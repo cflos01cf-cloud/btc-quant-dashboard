@@ -3,8 +3,9 @@ export default function Footer() {
     <footer className="mt-8 pb-6 text-center text-xs text-ink-500 space-y-1">
       <p>
         BTC Quant Dashboard Pro v2 — arquitectura hermana del EUR/USD Quant Dashboard Pro.
-        Datos vía Binance (precio, derivados, order book), alternative.me (Fear &amp; Greed) y
-        feeds RSS públicos (noticias).
+        Datos vía Coinbase Exchange (precio, velas, order book, ballenas), Kraken Futures
+        (funding/OI, best-effort), alternative.me (Fear &amp; Greed) y feeds RSS públicos
+        (noticias).
       </p>
       <p>
         El score, las señales y los eventos de Smart Money son heurísticas basadas en reglas, no

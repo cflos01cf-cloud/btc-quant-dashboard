@@ -29,7 +29,10 @@ export default function PriceHeader({
           </div>
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-ink-500">
-              {data?.symbol ?? "BTC/USDT"} · {data?.interval ?? "15m"}
+              {data?.symbol ?? "BTC/USD"} · {data?.interval ?? "15m"}
+              {data && data.resolvedInterval !== data.interval && (
+                <span className="text-bitcoin"> (usando {data.resolvedInterval} reales)</span>
+              )}
             </p>
             <p className="font-mono text-4xl tabular leading-tight text-ink-100">
               ${fmtUsd(price)}

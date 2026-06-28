@@ -15,6 +15,7 @@
 #                           noticias usando Claude Haiku en vez del
 #                           clasificador de palabras clave (gratuito)
 #
-# Binance (precio, derivados, order book) y alternative.me (Fear & Greed)
-# son APIs públicas, no requieren key.
+# Coinbase Exchange (precio, velas, order book, ballenas), Kraken Futures
+# (funding/OI, best-effort) y alternative.me (Fear & Greed) son APIs
+# públicas, no requieren key.
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
-import { getDerivativesSnapshot, getLiveBtcData, getWhaleSummary } from "../../lib/binance";
+import { getDerivativesSnapshot, getLiveBtcData, getWhaleSummary } from "../../lib/marketdata";
 import { buildIndicatorSnapshot } from "../../lib/indicators";
 import { detectSmcEvents } from "../../lib/smc";
 import { getFearGreedIndex } from "../../lib/feargreed";

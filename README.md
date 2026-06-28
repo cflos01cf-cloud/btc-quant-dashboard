@@ -5,6 +5,22 @@ con gráfico tipo TradingView, ~20 indicadores, un motor de Smart Money Concepts
 heurístico, derivados, sentimiento/noticias, watchlist, bitácora de operaciones con
 export a Excel, y alertas por Telegram.
 
+## ⚠️ Por qué Coinbase y no Binance (importante si vas a tocar el código)
+
+La versión original de este proyecto usaba la API pública de Binance. **No funciona en
+producción sobre Netlify**: Binance.com devuelve HTTP 451 ("Unavailable For Legal
+Reasons") a cualquier IP de EE.UU., y las funciones de Netlify corren desde EE.UU. por
+defecto (cambiar de región es una función de pago, plan Pro/Enterprise). Por eso el
+backend se reescribió sobre **Coinbase Exchange** (`api.exchange.coinbase.com`), que es
+exactamente lo opuesto: un exchange con base en EE.UU. que no bloquea IPs de EE.UU. — la
+opción robusta y gratuita sin depender de ningún plan de hosting.
+
+Costo de este cambio: Coinbase solo ofrece 6 granularidades de vela (1m/5m/15m/1h/6h/1d),
+no las 14 de Binance. El selector de timeframe sigue mostrando los 14 botones, pero cada
+uno se redondea a la granularidad más cercana disponible — el dashboard te avisa con
+"(usando Xm reales)" junto al precio cuando el timeframe mostrado no es exactamente el
+seleccionado. Ver el mapeo completo en `resolveGranularity()` en `lib/marketdata.ts`.
+
 ## Antes de nada: qué es esto y qué no es
 
 - El **score 0-100 y el veredicto COMPRAR/VENDER/NO OPERAR son un sistema de reglas
@@ -16,8 +32,10 @@ export a Excel, y alertas por Telegram.
 - El motor de "Smart Money Concepts" (BOS/CHOCH, FVG, liquidity sweeps, order blocks) es
   una **aproximación heurística simplificada**, no un motor ICT institucional.
 - "Actividad de ballenas" es una aproximación gratuita vía trades públicos grandes en
-  Binance (`aggTrades`), no datos on-chain reales (eso requeriría Glassnode/Whale Alert,
-  de pago).
+  Coinbase, no datos on-chain reales (eso requeriría Glassnode/Whale Alert, de pago).
+- "Long/Short Ratio" no tiene fuente gratuita disponible sin geo-bloqueo desde EE.UU.;
+  se muestra "n/d" — el score simplemente no usa ese check (`lib/score.ts` ya está
+  diseñado para ignorar checks con datos faltantes en vez de fallar).
 - No hay calendario económico (CPI, NFP, FOMC...): las APIs gratuitas confiables para
   esto son escasas; si lo quieres, la opción más viable es Trading Economics o FRED con
   registro gratuito, como siguiente paso.
@@ -30,8 +48,9 @@ sigue siendo tuyo.
 ## Qué incluye
 
 **Datos en tiempo real (sin API key):**
-- Precio, cambio %, volumen, spread implícito (Binance público)
-- Funding rate, Open Interest (+ cambio 2h), Long/Short Ratio (Binance Futures público)
+- Precio, velas, volumen, order book (**Coinbase Exchange público** — ver nota importante abajo)
+- Funding rate y Open Interest vía Kraken Futures (best-effort; Long/Short Ratio no tiene
+  fuente gratuita equivalente todavía, se muestra "n/d")
 - Fear & Greed Index (alternative.me)
 - Noticias (RSS de CoinDesk/Cointelegraph) con sentimiento por palabras clave, o vía
   Claude Haiku si configuras `ANTHROPIC_API_KEY`
@@ -59,7 +78,9 @@ Señal de **COMPRAR/VENDER solo con score ≥ 85/100** en una dirección clara; 
 otro caso es **NO OPERAR**. Cuando hay señal, se calculan Stop Loss y 3 Take Profit
 basados en ATR(14) (riesgo = 1.5×ATR, TPs en 1.5×/2.5×/4× ese riesgo).
 
-**Watchlist:** agrega cualquier par de Binance, precio y cambio 24h en vivo
+**Watchlist:** agrega cualquier símbolo con convención estilo Binance (ej. `ETH`, se
+completa solo a `ETHUSDT`), traducido internamente a Coinbase (`ETH-USD`); precio y
+cambio 24h en vivo
 (localStorage, por navegador).
 
 **Bitácora de operaciones (paper trading):** registra trades, calcula win rate y PnL,

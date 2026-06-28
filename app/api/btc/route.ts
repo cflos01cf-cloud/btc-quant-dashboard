@@ -3,7 +3,8 @@ import {
   getDerivativesSnapshot,
   getLiveBtcData,
   getWhaleSummary,
-} from "@/lib/binance";
+  resolveGranularity,
+} from "@/lib/marketdata";
 import {
   buildDemoCandles,
   buildDemoDerivatives,
@@ -48,6 +49,7 @@ export async function GET(req: NextRequest) {
         low24h: 0,
         volume24h: 0,
         interval,
+        resolvedInterval: resolveGranularity(interval).label,
         dataNotes: ["Modo demo: todos los datos son simulados."],
       })
     );
@@ -61,7 +63,7 @@ export async function GET(req: NextRequest) {
     // fallback, so one slow/unreachable API (news RSS, futures data) never
     // takes down the whole dashboard — it just degrades that one category.
     const [derivatives, whales, fearGreed, news] = await Promise.all([
-      safeFetch(getDerivativesSnapshot(), buildDemoDerivatives(), "Derivados (Binance Futures) no disponibles en este momento.", dataNotes),
+      safeFetch(getDerivativesSnapshot(), buildDemoDerivatives(), "Derivados (funding/OI vía Kraken Futures) no disponibles en este momento.", dataNotes),
       safeFetch(getWhaleSummary(), buildDemoWhales(), "Datos de ballenas no disponibles en este momento.", dataNotes),
       safeFetch(getFearGreedIndex(), null as FearGreed | null, "Fear & Greed Index no disponible en este momento.", dataNotes),
       safeFetch(getBtcNews(8), [] as NewsHeadline[], "Noticias no disponibles en este momento.", dataNotes),
@@ -81,6 +83,7 @@ export async function GET(req: NextRequest) {
         low24h: base.low24h,
         volume24h: base.volume24h,
         interval,
+        resolvedInterval: base.resolvedInterval,
         dataNotes,
       })
     );
@@ -88,7 +91,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       buildPayload({
         source: "demo",
-        warning: `No se pudo conectar a Binance (${err?.message || "error desconocido"}). Mostrando datos simulados.`,
+        warning: `No se pudo conectar a la fuente de datos (${err?.message || "error desconocido"}). Mostrando datos simulados.`,
         candles: buildDemoCandles(300),
         orderBook: buildDemoOrderBook(),
         derivatives: buildDemoDerivatives(),
@@ -100,7 +103,8 @@ export async function GET(req: NextRequest) {
         low24h: 0,
         volume24h: 0,
         interval,
-        dataNotes: ["Fallback completo a modo demo por fallo de conexión con Binance."],
+        resolvedInterval: resolveGranularity(interval).label,
+        dataNotes: ["Fallback completo a modo demo por fallo de conexión con la fuente de datos."],
       })
     );
   }
@@ -134,6 +138,7 @@ function buildPayload(args: {
   low24h: number;
   volume24h: number;
   interval: string;
+  resolvedInterval: string;
   dataNotes: string[];
 }): BtcDashboardPayload {
   const indicators = buildIndicatorSnapshot(args.candles);
@@ -153,8 +158,9 @@ function buildPayload(args: {
     source: args.source,
     warning: args.warning,
     fetchedAt: Date.now(),
-    symbol: "BTC/USDT",
+    symbol: "BTC/USD",
     interval: args.interval,
+    resolvedInterval: args.resolvedInterval,
     priceChangePct24h: args.priceChangePct24h,
     high24h: args.high24h,
     low24h: args.low24h,

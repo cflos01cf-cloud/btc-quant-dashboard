@@ -42,7 +42,7 @@ export default function DerivativesPanel({ data }: { data: DerivativesSnapshot }
 
   return (
     <div className="rounded-xl border border-edge bg-surface/70 p-5">
-      <p className="text-xs uppercase tracking-[0.18em] text-ink-500 mb-3">Derivados (Binance Futures)</p>
+      <p className="text-xs uppercase tracking-[0.18em] text-ink-500 mb-3">Derivados (Kraken Futures, best-effort)</p>
       <div className="grid grid-cols-2 gap-3">
         {items.map((it) => (
           <div key={it.label} className="rounded-lg bg-surface2/60 border border-edge px-3 py-2">

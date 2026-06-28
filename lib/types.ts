@@ -138,6 +138,7 @@ export interface BtcDashboardPayload {
   fetchedAt: number;
   symbol: string;
   interval: string;
+  resolvedInterval: string;
   priceChangePct24h: number;
   high24h: number;
   low24h: number;
