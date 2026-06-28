@@ -123,7 +123,7 @@ En Netlify → Site settings → Environment variables:
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | Habilita las alertas. Créalo hablando con `@BotFather` en Telegram. |
 | `TELEGRAM_CHAT_ID` | El chat/usuario que recibe la alerta. Puedes obtenerlo enviando un mensaje a tu bot y consultando `https://api.telegram.org/bot<TOKEN>/getUpdates`. |
-| `ANTHROPIC_API_KEY` | Mejora la clasificación de sentimiento de noticias (usa Claude Haiku en vez del clasificador de palabras clave). |
+| `ANTHROPIC_API_KEY` | Mejora la clasificación de sentimiento de noticias (usa Claude Haiku en vez del clasificador de palabras clave). Consume saldo de la API de Anthropic (separado de tu suscripción de Claude.ai) — con la caché de 15 min de `lib/news.ts`, son ~96 llamadas/día (una por ciclo de la función programada + las que caigan dentro de esa ventana desde el navegador), costo estimado bajo $0.10/día con Haiku 4.5. |
 
 Sin estas variables, el dashboard funciona igual — simplemente sin alertas push y con
 el clasificador de noticias gratuito.
