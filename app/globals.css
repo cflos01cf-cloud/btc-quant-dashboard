@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-app: 10 14 23;
+  --bg-surface: 15 20 30;
+  --bg-surface-2: 22 28 41;
+  --border: 32 40 56;
+  --text-primary: 231 233 238;
+  --text-muted: 174 182 196;
+  --text-faint: 124 133 151;
+  color-scheme: dark;
+}
+
+:root.light {
+  --bg-app: 245 243 238;
+  --bg-surface: 255 255 255;
+  --bg-surface-2: 240 237 230;
+  --border: 228 224 214;
+  --text-primary: 27 31 39;
+  --text-muted: 91 98 112;
+  --text-faint: 139 147 161;
+  color-scheme: light;
+}
+
+body {
+  background-color: rgb(var(--bg-app));
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(247, 147, 26, 0.08), transparent 45%),
+    linear-gradient(to right, rgba(127, 127, 127, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(127, 127, 127, 0.05) 1px, transparent 1px);
+  background-size: auto, 28px 28px, 28px 28px;
+  transition: background-color 0.2s ease;
+}
+
+::selection {
+  background: rgba(247, 147, 26, 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

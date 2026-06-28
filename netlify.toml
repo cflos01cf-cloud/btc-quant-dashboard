@@ -1,0 +1,20 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# ---------------------------------------------------------------------------
+# Variables de entorno (Site settings -> Environment variables en Netlify)
+# Todas son OPCIONALES. El dashboard funciona sin ninguna de ellas.
+#
+#   TELEGRAM_BOT_TOKEN   -> habilita alertas de la función programada
+#   TELEGRAM_CHAT_ID     -> chat/usuario de Telegram que recibe la alerta
+#   ANTHROPIC_API_KEY    -> mejora la clasificación de sentimiento de
+#                           noticias usando Claude Haiku en vez del
+#                           clasificador de palabras clave (gratuito)
+#
+# Binance (precio, derivados, order book) y alternative.me (Fear & Greed)
+# son APIs públicas, no requieren key.
+# ---------------------------------------------------------------------------
