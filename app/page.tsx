@@ -15,6 +15,7 @@ import Footer from "@/components/Footer";
 import { BtcDashboardPayload } from "@/lib/types";
 
 const POLL_MS = 20_000;
+const DEFAULT_INTERVAL = "1h";
 
 const TABS = [
   { id: "resumen", label: "Resumen" },
@@ -28,7 +29,7 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function Page() {
   const [mode, setMode] = useState<"live" | "demo">("live");
-  const [interval, setInterval_] = useState("15m");
+  const [interval, setInterval_] = useState(DEFAULT_INTERVAL);
   const [data, setData] = useState<BtcDashboardPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [tab, setTab] = useState<TabId>("resumen");
