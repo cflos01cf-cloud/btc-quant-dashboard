@@ -104,15 +104,22 @@ function scoreVolumen(
   lastCandleUp: boolean,
   orderBook: { imbalanceRatio: number }
 ): CategoryScore {
-  const volAboveAvg = ind.lastVolume > ind.avgVolume20 * 1.2;
+  // Lowered from 1.2x to 1.05x: with 1h candles volume is far more stable
+  // than on 15m, so the old 20% threshold almost never fired, leaving this
+  // category permanently neutral. 5% above average is a meaningful
+  // confirmation on a 1h timeframe.
+  const volAboveAvg = ind.lastVolume > ind.avgVolume20 * 1.05;
+  const volDir: Direction = volAboveAvg
+    ? lastCandleUp ? "bullish" : "bearish"
+    : ind.obvSlope; // when volume is flat, defer to OBV slope for direction
   const checks: ScoreCheck[] = [
     {
       label: "Confirmación por volumen",
       weight: 5,
-      direction: volAboveAvg ? (lastCandleUp ? "bullish" : "bearish") : "neutral",
+      direction: volDir,
       detail: volAboveAvg
         ? `Volumen ${(ind.lastVolume / ind.avgVolume20).toFixed(1)}x el promedio`
-        : "Volumen dentro de lo normal",
+        : `Volumen normal — dirección por OBV (${ind.obvSlope})`,
     },
     {
       label: "OBV",
@@ -165,23 +172,45 @@ function scoreSmartMoney(smcEvents: SmcEvent[], whales: WhaleSummary): CategoryS
 function scoreSentimiento(fearGreed: FearGreed | null): CategoryScore {
   if (!fearGreed) return gradeCategory("sentimiento", "Sentimiento (Fear & Greed)", [], 10);
   const { value } = fearGreed;
+
+  // Contrarian scale across the full range (not just extremes):
+  // 0-25  Extreme Fear  → strongly bullish (contrarian buy zone)
+  // 26-45 Fear          → mildly bullish
+  // 46-54 Neutral       → neutral (no vote)
+  // 55-74 Greed         → mildly bearish
+  // 75-100 Extreme Greed → strongly bearish (contrarian sell zone)
   let direction: Direction = "neutral";
-  let weight = 2;
+  let weight = 0;
+
   if (value <= 25) {
-    direction = "bullish"; // contrarian: extreme fear
-    weight = ((25 - value) / 25) * 10;
+    direction = "bullish";
+    weight = 5 + ((25 - value) / 25) * 5; // 5-10 depending on how extreme
+  } else if (value <= 45) {
+    direction = "bullish";
+    weight = 2 + ((45 - value) / 20) * 3; // 2-5
   } else if (value >= 75) {
-    direction = "bearish"; // contrarian: extreme greed
-    weight = ((value - 75) / 25) * 10;
+    direction = "bearish";
+    weight = 5 + ((value - 75) / 25) * 5; // 5-10
+  } else if (value >= 55) {
+    direction = "bearish";
+    weight = 2 + ((value - 55) / 20) * 3; // 2-5
   }
-  const checks: ScoreCheck[] = [
-    {
-      label: "Fear & Greed Index",
-      weight: Math.max(weight, 1),
-      direction,
-      detail: `${value}/100 — ${fearGreed.classification}`,
-    },
-  ];
+  // 46-54 stays neutral with weight 0
+
+  const checks: ScoreCheck[] = direction === "neutral"
+    ? [{
+        label: "Fear & Greed Index",
+        weight: 1,
+        direction: "neutral",
+        detail: `${value}/100 — ${fearGreed.classification} (zona neutral, sin voto)`,
+      }]
+    : [{
+        label: "Fear & Greed Index",
+        weight: Math.round(weight * 10) / 10,
+        direction,
+        detail: `${value}/100 — ${fearGreed.classification}`,
+      }];
+
   return gradeCategory("sentimiento", "Sentimiento (Fear & Greed)", checks, 10);
 }
 
