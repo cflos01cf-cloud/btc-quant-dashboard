@@ -6,6 +6,10 @@ import { detectSmcEvents } from "../../lib/smc";
 import { getFearGreedIndex } from "../../lib/feargreed";
 import { getBtcNews } from "../../lib/news";
 import { computeMaestroScore } from "../../lib/score";
+import { buildSignalRecord, listOpenSignals, saveSignal } from "../../lib/blobstore";
+
+const SIGNAL_SCORE_THRESHOLD = 60;
+const MAX_CONCURRENT_OPEN = 1;
 
 /**
  * Runs every 15 minutes. Recomputes the same Prompt Maestro score the
@@ -63,6 +67,23 @@ export default async () => {
     const shouldAlert = verdictChanged && maestro.verdict !== "NO_OPERAR";
 
     await store.setJSON("last-alert", { verdict: maestro.verdict, timestamp: Date.now(), score: maestro.total });
+
+    // --- Shadow tracking: record Coinbase signal if score >= threshold ---
+    if (maestro.total >= SIGNAL_SCORE_THRESHOLD && maestro.verdict !== "NO_OPERAR") {
+      const openSignals = await listOpenSignals("coinbase").catch(() => []);
+      if (openSignals.length < MAX_CONCURRENT_OPEN) {
+        const signal = buildSignalRecord({
+          source: "coinbase",
+          verdict: maestro.verdict,
+          direction: maestro.direction as "bullish" | "bearish",
+          score: maestro.total,
+          priceReference: indicators.price,
+          currency: "USD",
+          atr: indicators.atr14,
+        });
+        await saveSignal(signal).catch(() => null);
+      }
+    }
 
     if (!shouldAlert) {
       return new Response(

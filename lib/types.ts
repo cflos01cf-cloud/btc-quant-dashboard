@@ -177,3 +177,53 @@ export interface JournalEntry {
   notes: string;
   maestroScoreAtEntry: number | null;
 }
+
+// ---------- Shadow trading / signal outcome tracking ----------
+
+export type SignalSource = "coinbase" | "bitso";
+export type SignalStatus = "open" | "tp1_hit" | "tp2_hit" | "tp3_hit" | "sl_hit" | "expired";
+
+export interface SignalRecord {
+  id: string;                    // uuid-style: source-timestamp
+  source: SignalSource;
+  createdAt: number;             // ms epoch
+  verdict: Verdict;              // COMPRAR | VENDER
+  direction: "bullish" | "bearish";
+  score: number;                 // 0-100
+  priceReference: number;        // entry price in native currency (MXN for Bitso, USD for Coinbase)
+  currency: "MXN" | "USD";
+  stopLossPct: number;           // % below/above entry
+  tp1Pct: number;
+  tp2Pct: number;
+  tp3Pct: number;
+  status: SignalStatus;
+  closedAt: number | null;
+  closePricePct: number | null;  // % move from entry when closed
+  mfePct: number | null;         // max favorable excursion %
+  maePct: number | null;         // max adverse excursion %
+  expiresAt: number;             // auto-expire after 24h if no TP/SL hit
+}
+
+export interface CompareStats {
+  source: SignalSource;
+  totalSignals: number;
+  closedSignals: number;
+  winRate: number | null;        // % of closed signals that hit TP1+
+  avgScoreOnWins: number | null;
+  avgScoreOnLosses: number | null;
+  expectancyPct: number | null;  // avg % P&L per closed signal
+  byScoreBucket: {
+    bucket: string;              // e.g. "60-70", "70-80", "80-85", "85+"
+    total: number;
+    wins: number;
+    winRate: number | null;
+  }[];
+}
+
+export interface ComparePayload {
+  coinbase: CompareStats;
+  bitso: CompareStats;
+  openSignals: SignalRecord[];
+  recentClosed: SignalRecord[];
+  fetchedAt: number;
+}

@@ -11,6 +11,7 @@ import SentimentPanel from "@/components/SentimentPanel";
 import TimeframeSelector from "@/components/TimeframeSelector";
 import Watchlist from "@/components/Watchlist";
 import JournalPanel from "@/components/JournalPanel";
+import ComparePanel from "@/components/ComparePanel";
 import Footer from "@/components/Footer";
 import { BtcDashboardPayload } from "@/lib/types";
 
@@ -23,6 +24,7 @@ const TABS = [
   { id: "derivados", label: "Derivados & Sentimiento" },
   { id: "watchlist", label: "Watchlist" },
   { id: "bitacora", label: "Bitácora" },
+  { id: "comparativa", label: "📊 Comparativa" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -116,6 +118,8 @@ export default function Page() {
             {tab === "bitacora" && (
               <JournalPanel currentPrice={data.indicators.price} currentScore={data.maestro.total} />
             )}
+
+            {tab === "comparativa" && <ComparePanel />}
           </>
         )}
 
