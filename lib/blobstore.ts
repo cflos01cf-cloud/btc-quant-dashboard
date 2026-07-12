@@ -1,4 +1,32 @@
-import { getStore } from "@netlify/blobs";
+/**
+ * Persistence layer for signal outcome tracking.
+ *
+ * v1 used Netlify Blobs. v2 uses Supabase PostgreSQL — same public interface,
+ * so bitso-tracker.ts, scheduled-alert.ts, outcome-evaluator.ts and
+ * app/api/compare/route.ts require zero changes.
+ *
+ * Table: signal_records (created via SQL Editor in Supabase dashboard)
+ *   id TEXT PRIMARY KEY
+ *   source TEXT
+ *   created_at BIGINT
+ *   verdict TEXT
+ *   direction TEXT
+ *   score NUMERIC
+ *   price_reference NUMERIC
+ *   currency TEXT
+ *   stop_loss_pct NUMERIC
+ *   tp1_pct NUMERIC
+ *   tp2_pct NUMERIC
+ *   tp3_pct NUMERIC
+ *   status TEXT DEFAULT 'open'
+ *   closed_at BIGINT
+ *   close_price_pct NUMERIC
+ *   mfe_pct NUMERIC
+ *   mae_pct NUMERIC
+ *   expires_at BIGINT
+ */
+
+import { getSupabaseServer } from "./supabase";
 import {
   CompareStats,
   SignalRecord,
@@ -7,83 +35,130 @@ import {
   Verdict,
 } from "./types";
 
-/**
- * Persistence layer for signal outcome tracking, built on Netlify Blobs.
- *
- * Key schema:
- *   signals:coinbase:{id}   → SignalRecord (JSON)
- *   signals:bitso:{id}      → SignalRecord (JSON)
- *
- * We use per-record keys (not one giant array) so updates to individual
- * signal statuses don't require reading and rewriting the entire list.
- * The `list()` call with a prefix lets us paginate through all signals
- * for a given source efficiently.
- */
+const TABLE = "signal_records";
 
-function signalStore() {
-  return getStore({ name: "signal-outcomes", consistency: "strong" });
+/** Convert snake_case DB row → camelCase SignalRecord */
+function fromRow(row: any): SignalRecord {
+  return {
+    id: row.id,
+    source: row.source,
+    createdAt: row.created_at,
+    verdict: row.verdict,
+    direction: row.direction,
+    score: row.score,
+    priceReference: row.price_reference,
+    currency: row.currency,
+    stopLossPct: row.stop_loss_pct,
+    tp1Pct: row.tp1_pct,
+    tp2Pct: row.tp2_pct,
+    tp3Pct: row.tp3_pct,
+    status: row.status,
+    closedAt: row.closed_at ?? null,
+    closePricePct: row.close_price_pct ?? null,
+    mfePct: row.mfe_pct ?? null,
+    maePct: row.mae_pct ?? null,
+    expiresAt: row.expires_at,
+  };
 }
 
-function signalKey(source: SignalSource, id: string) {
-  return `signals:${source}:${id}`;
+/** Convert camelCase SignalRecord → snake_case DB row */
+function toRow(s: SignalRecord) {
+  return {
+    id: s.id,
+    source: s.source,
+    created_at: s.createdAt,
+    verdict: s.verdict,
+    direction: s.direction,
+    score: s.score,
+    price_reference: s.priceReference,
+    currency: s.currency,
+    stop_loss_pct: s.stopLossPct,
+    tp1_pct: s.tp1Pct,
+    tp2_pct: s.tp2Pct,
+    tp3_pct: s.tp3Pct,
+    status: s.status,
+    closed_at: s.closedAt,
+    close_price_pct: s.closePricePct,
+    mfe_pct: s.mfePct,
+    mae_pct: s.maePct,
+    expires_at: s.expiresAt,
+  };
 }
 
 export async function saveSignal(signal: SignalRecord): Promise<void> {
-  const store = signalStore();
-  await store.setJSON(signalKey(signal.source, signal.id), signal);
+  const sb = getSupabaseServer();
+  const { error } = await sb.from(TABLE).upsert(toRow(signal));
+  if (error) throw new Error(`saveSignal: ${error.message}`);
 }
 
 export async function getSignal(
-  source: SignalSource,
+  _source: SignalSource,
   id: string
 ): Promise<SignalRecord | null> {
-  const store = signalStore();
-  try {
-    return await store.get(signalKey(source, id), { type: "json" }) as SignalRecord;
-  } catch {
-    return null;
-  }
+  const sb = getSupabaseServer();
+  const { data, error } = await sb
+    .from(TABLE)
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error || !data) return null;
+  return fromRow(data);
 }
 
 export async function updateSignalStatus(
   source: SignalSource,
   id: string,
-  update: Partial<Pick<SignalRecord, "status" | "closedAt" | "closePricePct" | "mfePct" | "maePct">>
+  update: Partial<
+    Pick<
+      SignalRecord,
+      "status" | "closedAt" | "closePricePct" | "mfePct" | "maePct"
+    >
+  >
 ): Promise<void> {
-  const existing = await getSignal(source, id);
-  if (!existing) return;
-  await saveSignal({ ...existing, ...update });
+  const sb = getSupabaseServer();
+  const patch: Record<string, any> = {};
+  if (update.status !== undefined) patch.status = update.status;
+  if (update.closedAt !== undefined) patch.closed_at = update.closedAt;
+  if (update.closePricePct !== undefined)
+    patch.close_price_pct = update.closePricePct;
+  if (update.mfePct !== undefined) patch.mfe_pct = update.mfePct;
+  if (update.maePct !== undefined) patch.mae_pct = update.maePct;
+
+  const { error } = await sb
+    .from(TABLE)
+    .update(patch)
+    .eq("id", id)
+    .eq("source", source);
+  if (error) throw new Error(`updateSignalStatus: ${error.message}`);
 }
 
 export async function listSignals(
   source: SignalSource,
   limit = 200
 ): Promise<SignalRecord[]> {
-  const store = signalStore();
-  const prefix = `signals:${source}:`;
-  try {
-    const { blobs } = await store.list({ prefix });
-    const keys = blobs.map((b) => b.key).slice(-limit);
-    const records = await Promise.all(
-      keys.map(async (key) => {
-        try {
-          return await store.get(key, { type: "json" }) as SignalRecord;
-        } catch {
-          return null;
-        }
-      })
-    );
-    return records
-      .filter((r): r is SignalRecord => r !== null)
-      .sort((a, b) => a.createdAt - b.createdAt);
-  } catch {
-    return [];
-  }
+  const sb = getSupabaseServer();
+  const { data, error } = await sb
+    .from(TABLE)
+    .select("*")
+    .eq("source", source)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`listSignals: ${error.message}`);
+  return (data ?? []).map(fromRow);
 }
 
-export async function listOpenSignals(source: SignalSource): Promise<SignalRecord[]> {
-  const all = await listSignals(source);
-  return all.filter((s) => s.status === "open");
+export async function listOpenSignals(
+  source: SignalSource
+): Promise<SignalRecord[]> {
+  const sb = getSupabaseServer();
+  const { data, error } = await sb
+    .from(TABLE)
+    .select("*")
+    .eq("source", source)
+    .eq("status", "open")
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(`listOpenSignals: ${error.message}`);
+  return (data ?? []).map(fromRow);
 }
 
 /**
@@ -91,6 +166,7 @@ export async function listOpenSignals(source: SignalSource): Promise<SignalRecor
  * "Win" = signal that hit TP1 or better before hitting SL or expiring.
  */
 export function computeStats(signals: SignalRecord[]): CompareStats {
+  const source = signals[0]?.source ?? "coinbase";
   const closed = signals.filter((s) => s.status !== "open");
   const wins = closed.filter(
     (s) =>
@@ -109,10 +185,10 @@ export function computeStats(signals: SignalRecord[]): CompareStats {
 
   const expectancy =
     closed.length > 0
-      ? closed.reduce((s, r) => s + (r.closePricePct ?? 0), 0) / closed.length
+      ? closed.reduce((s, r) => s + (r.closePricePct ?? 0), 0) /
+        closed.length
       : null;
 
-  // Score buckets: 60-70, 70-80, 80-85, 85+
   const buckets = [
     { label: "60-70", min: 60, max: 70 },
     { label: "70-80", min: 70, max: 80 },
@@ -140,7 +216,7 @@ export function computeStats(signals: SignalRecord[]): CompareStats {
   });
 
   return {
-    source: signals[0]?.source ?? "coinbase",
+    source,
     totalSignals: signals.length,
     closedSignals: closed.length,
     winRate:
@@ -154,8 +230,6 @@ export function computeStats(signals: SignalRecord[]): CompareStats {
 
 /**
  * Build a new SignalRecord from score engine output.
- * SL = 1.5× ATR from entry (expressed as %).
- * TP1/2/3 = 1.5×/2.5×/4× risk (same ratios as the main dashboard).
  */
 export function buildSignalRecord(args: {
   source: SignalSource;
@@ -166,15 +240,14 @@ export function buildSignalRecord(args: {
   currency: "MXN" | "USD";
   atr: number;
 }): SignalRecord {
-  const { source, verdict, direction, score, priceReference, currency, atr } = args;
-  const riskPct = (atr * 1.5) / priceReference; // fraction, e.g. 0.015 = 1.5%
+  const { source, verdict, direction, score, priceReference, currency, atr } =
+    args;
+  const riskPct = (atr * 1.5) / priceReference;
   const sign = direction === "bullish" ? 1 : -1;
-
   const now = Date.now();
-  const id = `${source}-${now}`;
 
   return {
-    id,
+    id: `${source}-${now}`,
     source,
     createdAt: now,
     verdict,
@@ -182,7 +255,7 @@ export function buildSignalRecord(args: {
     score,
     priceReference,
     currency,
-    stopLossPct: -riskPct * 100 * sign,   // negative for longs, positive for shorts
+    stopLossPct: -riskPct * 100 * sign,
     tp1Pct: riskPct * 100 * 1.5 * sign,
     tp2Pct: riskPct * 100 * 2.5 * sign,
     tp3Pct: riskPct * 100 * 4.0 * sign,
@@ -191,6 +264,6 @@ export function buildSignalRecord(args: {
     closePricePct: null,
     mfePct: null,
     maePct: null,
-    expiresAt: now + 24 * 60 * 60_000,    // auto-expire after 24h
+    expiresAt: now + 24 * 60 * 60_000,
   };
 }
