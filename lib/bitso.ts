@@ -250,7 +250,11 @@ export async function getBitsoBalance(): Promise<{
 } | null> {
   try {
     const json = await fetchPrivate("/balance/");
-    if (!json.success) return null;
+    console.log("[bitso balance raw]", JSON.stringify(json).slice(0, 500));
+    if (!json.success) {
+      console.log("[bitso balance] success=false, error:", json.error);
+      return null;
+    }
     const balances: any[] = json.payload.balances;
     const btc = balances.find((b: any) => b.currency === "btc");
     const mxn = balances.find((b: any) => b.currency === "mxn");
@@ -258,11 +262,11 @@ export async function getBitsoBalance(): Promise<{
       btc: parseFloat(btc?.available ?? "0"),
       mxn: parseFloat(mxn?.available ?? "0"),
     };
-  } catch {
+  } catch (err: any) {
+    console.log("[bitso balance] error:", err?.message);
     return null;
   }
 }
-
 /** Returns the last N user trades for btc_mxn (read-only). */
 export async function getBitsoUserTrades(limit = 25): Promise<
   {
