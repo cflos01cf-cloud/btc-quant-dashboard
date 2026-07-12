@@ -226,7 +226,12 @@ async function fetchPrivate(
     throw new Error("Faltan BITSO_API_KEY / BITSO_API_SECRET en las variables de entorno");
   }
 
-  const authHeader = buildAuthHeader(apiKey, apiSecret, method, path);
+  // Bitso requires the FULL path including /api/v3 in the HMAC signature,
+  // but the fetch URL uses the base (api.bitso.com/v3). These are different:
+  // - Signature message uses: /api/v3/balance/
+  // - Fetch URL uses: https://api.bitso.com/v3/balance/
+  const signaturePath = `/api/v3${path}`;
+  const authHeader = buildAuthHeader(apiKey, apiSecret, method, signaturePath);
 
   const res = await fetch(`${BITSO_BASE}${path}`, {
     method,
@@ -267,6 +272,7 @@ export async function getBitsoBalance(): Promise<{
     return null;
   }
 }
+
 /** Returns the last N user trades for btc_mxn (read-only). */
 export async function getBitsoUserTrades(limit = 25): Promise<
   {
