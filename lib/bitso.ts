@@ -226,11 +226,10 @@ async function fetchPrivate(
     throw new Error("Faltan BITSO_API_KEY / BITSO_API_SECRET en las variables de entorno");
   }
 
-  // Bitso requires the FULL path including /api/v3 in the HMAC signature,
-  // but the fetch URL uses the base (api.bitso.com/v3). These are different:
-  // - Signature message uses: /api/v3/balance/
-  // - Fetch URL uses: https://api.bitso.com/v3/balance/
-  const signaturePath = `/api/v3${path}`;
+  // The Bitso JavaScript example uses /v3/path in the signature (without /api prefix).
+  // The bash example uses /api/v3/path. We follow the JS convention which matches
+  // the official Node.js sample on bitso.com/api_info
+  const signaturePath = `/v3${path}`;
   const authHeader = buildAuthHeader(apiKey, apiSecret, method, signaturePath);
 
   const res = await fetch(`${BITSO_BASE}${path}`, {
