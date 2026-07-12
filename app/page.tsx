@@ -12,6 +12,7 @@ import TimeframeSelector from "@/components/TimeframeSelector";
 import Watchlist from "@/components/Watchlist";
 import JournalPanel from "@/components/JournalPanel";
 import ComparePanel from "@/components/ComparePanel";
+import BitsoAccountPanel from "@/components/BitsoAccountPanel";
 import Footer from "@/components/Footer";
 import { BtcDashboardPayload } from "@/lib/types";
 
@@ -25,6 +26,7 @@ const TABS = [
   { id: "watchlist", label: "Watchlist" },
   { id: "bitacora", label: "Bitácora" },
   { id: "comparativa", label: "📊 Comparativa" },
+  { id: "bitso", label: "🏦 Cuenta Bitso" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -120,6 +122,8 @@ export default function Page() {
             )}
 
             {tab === "comparativa" && <ComparePanel />}
+
+            {tab === "bitso" && <BitsoAccountPanel />}
           </>
         )}
 

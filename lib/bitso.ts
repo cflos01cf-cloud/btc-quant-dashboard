@@ -191,3 +191,103 @@ export async function getBitsoOrderBook(): Promise<{
     imbalanceRatio: askVolume > 0 ? bidVolume / askVolume : 1,
   };
 }
+
+// ============================================================
+// PRIVATE API — HMAC-SHA256 authentication
+// Only used for read-only endpoints (balance, user trades).
+// NO order creation endpoints are used in this file.
+// ============================================================
+
+import { createHmac } from "crypto";
+
+function buildAuthHeader(
+  apiKey: string,
+  apiSecret: string,
+  method: "GET" | "POST",
+  requestPath: string,
+  jsonPayload = ""
+): string {
+  const nonce = Date.now().toString();
+  const message = `${nonce}${method}${requestPath}${jsonPayload}`;
+  const signature = createHmac("sha256", apiSecret)
+    .update(message)
+    .digest("hex");
+  return `Bitso ${apiKey}:${nonce}:${signature}`;
+}
+
+async function fetchPrivate(
+  path: string,
+  method: "GET" | "POST" = "GET"
+): Promise<any> {
+  const apiKey = process.env.BITSO_API_KEY;
+  const apiSecret = process.env.BITSO_API_SECRET;
+
+  if (!apiKey || !apiSecret) {
+    throw new Error("Faltan BITSO_API_KEY / BITSO_API_SECRET en las variables de entorno");
+  }
+
+  const authHeader = buildAuthHeader(apiKey, apiSecret, method, path);
+
+  const res = await fetch(`${BITSO_BASE}${path}`, {
+    method,
+    headers: {
+      Authorization: authHeader,
+      "Content-Type": "application/json",
+      "User-Agent": "btc-quant-dashboard",
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(8000),
+  });
+
+  if (!res.ok) throw new Error(`Bitso private API respondió ${res.status} en ${path}`);
+  return await res.json();
+}
+
+/** Returns BTC and MXN balances from the authenticated Bitso account. */
+export async function getBitsoBalance(): Promise<{
+  btc: number;
+  mxn: number;
+} | null> {
+  try {
+    const json = await fetchPrivate("/balance/");
+    if (!json.success) return null;
+    const balances: any[] = json.payload.balances;
+    const btc = balances.find((b: any) => b.currency === "btc");
+    const mxn = balances.find((b: any) => b.currency === "mxn");
+    return {
+      btc: parseFloat(btc?.available ?? "0"),
+      mxn: parseFloat(mxn?.available ?? "0"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Returns the last N user trades for btc_mxn (read-only). */
+export async function getBitsoUserTrades(limit = 25): Promise<
+  {
+    tid: string;
+    side: "buy" | "sell";
+    price: number;
+    amount: number;
+    feesAmount: number;
+    createdAt: number;
+  }[]
+> {
+  try {
+    const json = await fetchPrivate(
+      `/user_trades/?book=${BOOK}&limit=${limit}&sort=desc`
+    );
+    if (!json.success) return [];
+    return json.payload.map((t: any) => ({
+      tid: t.tid,
+      side: t.side as "buy" | "sell",
+      price: parseFloat(t.price),
+      amount: parseFloat(t.major),
+      feesAmount: parseFloat(t.fees_amount),
+      createdAt: new Date(t.created_at).getTime(),
+    }));
+  } catch {
+    return [];
+  }
+}
