@@ -173,24 +173,29 @@ export async function getDerivativesSnapshot(): Promise<DerivativesSnapshot> {
 
   try {
     const data = await fetchJson(KRAKEN_FUTURES_TICKERS, 5000);
-    const ticker = data?.tickers?.find(
-      (t: any) => t.symbol === "PF_XBTUSD"
-    );
-    if (ticker) {
-      // Use relativeFundingRate (comparable to Binance funding rate)
-      // Falls back to fundingRate only if relativeFundingRate is absent
-      const relativeRate =
-        typeof ticker.relativeFundingRate === "number"
-          ? ticker.relativeFundingRate
-          : typeof ticker.fundingRate === "number"
-            ? ticker.fundingRate * 3600 // convert per-second to per-hour
-            : null;
 
-      result.fundingRate = relativeRate;
+    // PI_XBTUSD is the liquid BTC perpetual on Kraken (83k+ vol/day, 3.6M OI).
+    // PF_XBTUSD is illiquid (~2k vol/day, 1.9k OI) and returns garbage fundingRate values.
+    const ticker = data?.tickers?.find(
+      (t: any) => t.symbol === "PI_XBTUSD"
+    );
+
+    if (ticker) {
+      // PI_XBTUSD returns fundingRate in per-SECOND format (e.g. -4.09e-10).
+      // Multiply × 3600 to get the rate per hour, which is comparable to
+      // Binance's funding rate (expressed per 8h period).
+      // Example: -4.09e-10 × 3600 = -1.47e-6 per hour ≈ -0.000147% — normal for BTC.
+      const fundingRatePerSecond =
+        typeof ticker.fundingRate === "number" ? ticker.fundingRate : null;
+
+      result.fundingRate =
+        fundingRatePerSecond !== null ? fundingRatePerSecond * 3600 : null;
+
       result.markPrice =
         typeof ticker.markPrice === "number" ? ticker.markPrice : null;
 
-      // Convert OI from USD contracts to BTC
+      // openInterest for PI_XBTUSD is in USD (not BTC contracts).
+      // Convert to BTC by dividing by markPrice.
       if (
         typeof ticker.openInterest === "number" &&
         result.markPrice !== null &&
