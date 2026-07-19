@@ -53,7 +53,6 @@ function detectBosChoch(candles: Candle[], swings: Swing[]): SmcEvent[] {
         label: "BOS alcista",
         detail: `Ruptura de estructura sobre ${prevHigh.price.toFixed(0)}`,
         price: prevHigh.price,
-        index: prevHigh.index,
       });
     }
   }
