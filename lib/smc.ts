@@ -70,7 +70,6 @@ function detectBosChoch(candles: Candle[], swings: Swing[]): SmcEvent[] {
         label: "BOS bajista",
         detail: `Ruptura de estructura bajo ${prevLow.price.toFixed(0)}`,
         price: prevLow.price,
-        index: prevLow.index,
       });
     }
   }
@@ -93,7 +92,6 @@ function detectBosChoch(candles: Candle[], swings: Swing[]): SmcEvent[] {
             label: "CHOCH — cambio de carácter alcista",
             detail: "Posible reversión de tendencia bajista",
             price: lastBearBos.price,
-            index: lastBearBos.index,
           };
     if (reversal) events.push(reversal);
   }
@@ -114,7 +112,6 @@ function detectFVG(candles: Candle[]): SmcEvent[] {
         label: "FVG alcista",
         detail: `Vacío de valor justo en ${c1.high.toFixed(0)}-${c3.low.toFixed(0)}`,
         price: (c1.high + c3.low) / 2,
-        index: i,
       });
     }
     // Bearish FVG: gap between c3.high and c1.low (c3.high < c1.low)
@@ -125,7 +122,6 @@ function detectFVG(candles: Candle[]): SmcEvent[] {
         label: "FVG bajista",
         detail: `Vacío de valor justo en ${c3.high.toFixed(0)}-${c1.low.toFixed(0)}`,
         price: (c3.high + c1.low) / 2,
-        index: i,
       });
     }
   }
@@ -150,7 +146,6 @@ function detectLiquiditySweeps(candles: Candle[], swings: Swing[]): SmcEvent[] {
         label: "Sweep de liquidez alcista (trampa)",
         detail: `Barrido sobre ${swing.price.toFixed(0)} con cierre por debajo`,
         price: swing.price,
-        index: swing.index,
       });
     }
   });
@@ -163,7 +158,6 @@ function detectLiquiditySweeps(candles: Candle[], swings: Swing[]): SmcEvent[] {
         label: "Sweep de liquidez bajista (trampa)",
         detail: `Barrido bajo ${swing.price.toFixed(0)} con cierre por encima`,
         price: swing.price,
-        index: swing.index,
       });
     }
   });
@@ -192,7 +186,6 @@ function detectOrderBlocks(candles: Candle[], swings: Swing[]): SmcEvent[] {
         label: "Order Block alcista",
         detail: `OB en zona ${oblCandle.low.toFixed(0)}-${oblCandle.high.toFixed(0)}`,
         price: (oblCandle.high + oblCandle.low) / 2,
-        index: bos.index - 1,
       });
     } else if (isBearishOB) {
       events.push({
@@ -201,7 +194,6 @@ function detectOrderBlocks(candles: Candle[], swings: Swing[]): SmcEvent[] {
         label: "Order Block bajista",
         detail: `OB en zona ${oblCandle.low.toFixed(0)}-${oblCandle.high.toFixed(0)}`,
         price: (oblCandle.high + oblCandle.low) / 2,
-        index: bos.index - 1,
       });
     }
   });
