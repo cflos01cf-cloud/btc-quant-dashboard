@@ -2,23 +2,13 @@ import { Candle, Direction, SmcEvent } from "./types";
 
 /**
  * FIX #10 — BOS/CHOCH lookback increased from 2 to 5.
- *
- * Previous: findSwings() used lookback=2, meaning a candle qualified as a
- * swing high if its high was the highest of only 5 candles (2 before + itself
- * + 2 after). In a strong trend almost every candle triggers a swing, making
- * BOS/CHOCH fire on every bar — useless noise.
- *
- * Standard SMC / ICT implementations use lookback ≥ 5 for meaningful swings.
  * With lookback=5, a swing high requires being the highest of 11 candles,
- * which filters out noise while still catching significant structure breaks.
- *
- * Practical effect: BOS/CHOCH now fires roughly 3-5x less often, focusing
- * only on structurally significant breakouts.
+ * filtering noise and focusing on structurally significant breakouts.
  */
-const SMC_LOOKBACK = 5; // was 2
+const SMC_LOOKBACK = 5;
 
 interface Swing {
-  index: number;
+  candleIndex: number;
   price: number;
   type: "high" | "low";
 }
@@ -29,8 +19,8 @@ function findSwings(candles: Candle[], lookback = SMC_LOOKBACK): Swing[] {
     const window = candles.slice(i - lookback, i + lookback + 1);
     const isSwingHigh = candles[i].high === Math.max(...window.map((c) => c.high));
     const isSwingLow = candles[i].low === Math.min(...window.map((c) => c.low));
-    if (isSwingHigh) swings.push({ index: i, price: candles[i].high, type: "high" });
-    if (isSwingLow) swings.push({ index: i, price: candles[i].low, type: "low" });
+    if (isSwingHigh) swings.push({ candleIndex: i, price: candles[i].high, type: "high" });
+    if (isSwingLow) swings.push({ candleIndex: i, price: candles[i].low, type: "low" });
   }
   return swings;
 }
@@ -40,13 +30,11 @@ function detectBosChoch(candles: Candle[], swings: Swing[]): SmcEvent[] {
   const highs = swings.filter((s) => s.type === "high");
   const lows = swings.filter((s) => s.type === "low");
 
-  // BOS bullish: price closes above the last significant swing high
+  // BOS bullish: price closes above last swing high
   for (let i = 1; i < highs.length; i++) {
     const prevHigh = highs[i - 1];
-    const breakCandle = candles.slice(prevHigh.index + 1).find(
-      (c) => c.close > prevHigh.price
-    );
-    if (breakCandle) {
+    const broke = candles.slice(prevHigh.candleIndex + 1).some((c) => c.close > prevHigh.price);
+    if (broke) {
       events.push({
         type: "BOS",
         direction: "bullish",
@@ -57,13 +45,11 @@ function detectBosChoch(candles: Candle[], swings: Swing[]): SmcEvent[] {
     }
   }
 
-  // BOS bearish: price closes below the last significant swing low
+  // BOS bearish: price closes below last swing low
   for (let i = 1; i < lows.length; i++) {
     const prevLow = lows[i - 1];
-    const breakCandle = candles.slice(prevLow.index + 1).find(
-      (c) => c.close < prevLow.price
-    );
-    if (breakCandle) {
+    const broke = candles.slice(prevLow.candleIndex + 1).some((c) => c.close < prevLow.price);
+    if (broke) {
       events.push({
         type: "BOS",
         direction: "bearish",
@@ -74,26 +60,23 @@ function detectBosChoch(candles: Candle[], swings: Swing[]): SmcEvent[] {
     }
   }
 
-  // CHOCH: when the last BOS direction reverses
-  const lastBullBos = [...events].reverse().find(
-    (e) => e.type === "BOS" && e.direction === "bullish"
-  );
-  const lastBearBos = [...events].reverse().find(
-    (e) => e.type === "BOS" && e.direction === "bearish"
-  );
+  // CHOCH: reversal of last BOS direction
+  const lastBullBos = [...events].reverse().find((e) => e.type === "BOS" && e.direction === "bullish");
+  const lastBearBos = [...events].reverse().find((e) => e.type === "BOS" && e.direction === "bearish");
 
   if (lastBullBos && lastBearBos) {
-    const reversal =
-      lastBullBos.index > lastBearBos.index
-        ? null
-        : {
-            type: "CHOCH" as const,
-            direction: "bullish" as Direction,
-            label: "CHOCH — cambio de carácter alcista",
-            detail: "Posible reversión de tendencia bajista",
-            price: lastBearBos.price,
-          };
-    if (reversal) events.push(reversal);
+    // Find which one appeared later in the events array
+    const bullIdx = events.lastIndexOf(lastBullBos);
+    const bearIdx = events.lastIndexOf(lastBearBos);
+    if (bearIdx > bullIdx) {
+      events.push({
+        type: "CHOCH",
+        direction: "bullish",
+        label: "CHOCH — cambio de carácter alcista",
+        detail: "Posible reversión de tendencia bajista",
+        price: lastBearBos.price,
+      });
+    }
   }
 
   return events.slice(-5);
@@ -104,8 +87,9 @@ function detectFVG(candles: Candle[]): SmcEvent[] {
   for (let i = 2; i < candles.length; i++) {
     const c1 = candles[i - 2];
     const c3 = candles[i];
-    // Bullish FVG: gap between c1.high and c3.low (c3.low > c1.high)
-    if (c3.low > c1.high && c3.low - c1.high > candles[i - 1].close * 0.001) {
+    const minGap = candles[i - 1].close * 0.001;
+
+    if (c3.low > c1.high && c3.low - c1.high > minGap) {
       events.push({
         type: "FVG",
         direction: "bullish",
@@ -114,8 +98,7 @@ function detectFVG(candles: Candle[]): SmcEvent[] {
         price: (c1.high + c3.low) / 2,
       });
     }
-    // Bearish FVG: gap between c3.high and c1.low (c3.high < c1.low)
-    if (c1.low > c3.high && c1.low - c3.high > candles[i - 1].close * 0.001) {
+    if (c1.low > c3.high && c1.low - c3.high > minGap) {
       events.push({
         type: "FVG",
         direction: "bearish",
@@ -131,14 +114,8 @@ function detectFVG(candles: Candle[]): SmcEvent[] {
 function detectLiquiditySweeps(candles: Candle[], swings: Swing[]): SmcEvent[] {
   const events: SmcEvent[] = [];
   const last = candles[candles.length - 1];
-  const recentHighs = swings
-    .filter((s) => s.type === "high")
-    .slice(-3);
-  const recentLows = swings
-    .filter((s) => s.type === "low")
-    .slice(-3);
 
-  recentHighs.forEach((swing) => {
+  swings.filter((s) => s.type === "high").slice(-3).forEach((swing) => {
     if (last.high > swing.price && last.close < swing.price) {
       events.push({
         type: "LIQUIDITY_SWEEP",
@@ -150,7 +127,7 @@ function detectLiquiditySweeps(candles: Candle[], swings: Swing[]): SmcEvent[] {
     }
   });
 
-  recentLows.forEach((swing) => {
+  swings.filter((s) => s.type === "low").slice(-3).forEach((swing) => {
     if (last.low < swing.price && last.close > swing.price) {
       events.push({
         type: "LIQUIDITY_SWEEP",
@@ -166,20 +143,18 @@ function detectLiquiditySweeps(candles: Candle[], swings: Swing[]): SmcEvent[] {
 }
 
 function detectOrderBlocks(candles: Candle[], swings: Swing[]): SmcEvent[] {
+  const bosEvents = detectBosChoch(candles, swings).filter((e) => e.type === "BOS");
   const events: SmcEvent[] = [];
-  const bosEvents = detectBosChoch(candles, swings).filter(
-    (e) => e.type === "BOS"
-  );
 
   bosEvents.forEach((bos) => {
-    const oblCandle = candles[Math.max(0, bos.index - 1)];
-    if (!oblCandle) return;
-    const isBullishOB =
-      bos.direction === "bullish" && oblCandle.close < oblCandle.open;
-    const isBearishOB =
-      bos.direction === "bearish" && oblCandle.close > oblCandle.open;
+    // Find the candle just before the BOS price level
+    const bosCandle = candles.find((c) => Math.abs(c.close - bos.price) / bos.price < 0.002);
+    if (!bosCandle) return;
+    const oblIdx = candles.indexOf(bosCandle) - 1;
+    if (oblIdx < 0) return;
+    const oblCandle = candles[oblIdx];
 
-    if (isBullishOB) {
+    if (bos.direction === "bullish" && oblCandle.close < oblCandle.open) {
       events.push({
         type: "ORDER_BLOCK",
         direction: "bullish",
@@ -187,7 +162,7 @@ function detectOrderBlocks(candles: Candle[], swings: Swing[]): SmcEvent[] {
         detail: `OB en zona ${oblCandle.low.toFixed(0)}-${oblCandle.high.toFixed(0)}`,
         price: (oblCandle.high + oblCandle.low) / 2,
       });
-    } else if (isBearishOB) {
+    } else if (bos.direction === "bearish" && oblCandle.close > oblCandle.open) {
       events.push({
         type: "ORDER_BLOCK",
         direction: "bearish",
