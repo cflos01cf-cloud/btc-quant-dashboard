@@ -148,7 +148,8 @@ function detectOrderBlocks(candles: Candle[], swings: Swing[]): SmcEvent[] {
 
   bosEvents.forEach((bos) => {
     // Find the candle just before the BOS price level
-    const bosCandle = candles.find((c) => Math.abs(c.close - bos.price) / bos.price < 0.002);
+    if (!bos.price) return;
+    const bosCandle = candles.find((c) => Math.abs(c.close - bos.price!) / bos.price! < 0.002);
     if (!bosCandle) return;
     const oblIdx = candles.indexOf(bosCandle) - 1;
     if (oblIdx < 0) return;
