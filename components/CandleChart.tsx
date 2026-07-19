@@ -14,9 +14,11 @@ import { Candle } from "@/lib/types";
 
 interface Props {
   candles: Candle[];
-  ema20: number;
-  ema50: number;
-  ema200: number;
+  indicators: {
+    ema20: number;
+    ema50: number;
+    ema200: number;
+  };
 }
 
 /**
@@ -37,12 +39,13 @@ interface Props {
  * so they can never be stale. A mounted flag guards against updates after
  * the component has unmounted (React StrictMode double-invoke protection).
  */
-export default function CandleChart({ candles, ema20, ema50, ema200 }: Props) {
+export default function CandleChart({ candles, indicators }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!containerRef.current || candles.length === 0) return;
 
+    const { ema20, ema50, ema200 } = indicators;
     let mounted = true;
 
     // ── Chart creation ──────────────────────────────────────────────────────
