@@ -107,18 +107,53 @@ export function atr(candles: Candle[], period = 14): number[] {
 }
 
 /** Rolling VWAP over the supplied candle window (not a calendar-session VWAP). */
-export function vwapSeries(candles: Candle[]): number[] {
+/**
+ * FIX #3 — VWAP de sesión real (reinicia a las 00:00 UTC).
+ *
+ * El VWAP anterior era acumulativo sobre toda la ventana de 300 velas,
+ * no un VWAP de sesión. Un VWAP de ventana diverge del VWAP institucional
+ * que usan TradingView y los traders profesionales, produciendo diferencias
+ * de 0.5-2% en precio que cambian si el precio está "sobre" o "bajo" el VWAP.
+ *
+ * Esta función filtra las velas al día UTC actual antes de calcular el VWAP,
+ * replicando el comportamiento estándar de TradingView.
+ *
+ * Si no hay velas del día actual (ej. timeframe 1d), cae al VWAP de ventana
+ * como aproximación razonable.
+ */
+export function vwapSeries(candles: { time: number; high: number; low: number; close: number; volume: number }[]): number[] {
+  if (candles.length === 0) return [];
+
+  // Find the start of the current UTC day
+  const now = Date.now();
+  const startOfTodayUtc = now - (now % 86_400_000);
+
+  // Find the index where today's session starts
+  const sessionStartIdx = candles.findIndex((c) => c.time >= startOfTodayUtc);
+
+  // If we found today's candles, use session VWAP; otherwise fall back to window VWAP
+  const sessionStart = sessionStartIdx >= 0 ? sessionStartIdx : 0;
+
   const out: number[] = [];
   let cumPV = 0;
   let cumVol = 0;
-  candles.forEach((c) => {
+
+  candles.forEach((c, i) => {
+    // Reset accumulator at session start
+    if (i === sessionStart) {
+      cumPV = 0;
+      cumVol = 0;
+    }
     const typicalPrice = (c.high + c.low + c.close) / 3;
     cumPV += typicalPrice * c.volume;
     cumVol += c.volume;
+    // Guard against division by zero (original bug from EUR/USD dashboard)
     out.push(cumVol > 0 ? cumPV / cumVol : c.close);
   });
+
   return out;
 }
+
 
 /** ADX(14) with +DI/-DI, Wilder smoothing. */
 export function adx(candles: Candle[], period = 14) {

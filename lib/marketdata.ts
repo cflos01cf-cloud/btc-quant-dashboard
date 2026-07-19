@@ -1,25 +1,5 @@
 import { Candle, DerivativesSnapshot, WhaleSummary } from "./types";
 
-/**
- * Market data client — Coinbase Exchange public API (api.exchange.coinbase.com).
- *
- * WHY COINBASE INSTEAD OF BINANCE: Binance.com returns HTTP 451 ("Unavailable
- * For Legal Reasons") for requests originating from US IP addresses, and
- * Netlify Functions run from US AWS regions by default (changing region
- * requires a Netlify Pro/Enterprise plan). Coinbase is a US-domiciled,
- * US-licensed exchange — it does not geo-block US server IPs, which is
- * exactly the opposite constraint, so it's the more robust free choice for
- * a Netlify-hosted dashboard regardless of hosting plan.
- *
- * Trade-off: Coinbase's public candle granularities are coarser than
- * Binance's (only 1m/5m/15m/1h/6h/1d vs. Binance's full 1m..1M range). See
- * `resolveGranularity()` below for how each UI timeframe maps to one of
- * these. Coinbase also has no perpetual-futures endpoint, so funding
- * rate / open interest are attempted via Kraken Futures' public ticker as a
- * best-effort secondary source (see getDerivativesSnapshot) — if that's
- * also unreachable, those fields just degrade to null, same as before.
- */
-
 const PRODUCT = "BTC-USD";
 const COINBASE_BASE = "https://api.exchange.coinbase.com";
 const KRAKEN_FUTURES_TICKERS = "https://futures.kraken.com/derivatives/api/v3/tickers";
@@ -52,7 +32,6 @@ async function fetchJson(url: string, timeoutMs = 8000) {
   }
 }
 
-/** Maps the dashboard's full timeframe list to Coinbase's 6 supported granularities. */
 const GRANULARITY_MAP: Record<string, { seconds: number; label: string }> = {
   "1m": { seconds: 60, label: "1m" },
   "3m": { seconds: 60, label: "1m" },
@@ -74,7 +53,10 @@ export function resolveGranularity(interval: string) {
   return GRANULARITY_MAP[interval] ?? GRANULARITY_MAP["15m"];
 }
 
-export async function getKlines(interval: string, limit: number): Promise<{ candles: Candle[]; resolvedInterval: string }> {
+export async function getKlines(
+  interval: string,
+  limit: number
+): Promise<{ candles: Candle[]; resolvedInterval: string }> {
   const { seconds, label } = resolveGranularity(interval);
   const cacheKey = `candles:${seconds}`;
   const cached = getCached<Candle[]>(cacheKey, 15_000);
@@ -83,7 +65,10 @@ export async function getKlines(interval: string, limit: number): Promise<{ cand
   const raw: number[][] = await fetchJson(
     `${COINBASE_BASE}/products/${PRODUCT}/candles?granularity=${seconds}`
   );
-  // Coinbase returns newest-first: [time, low, high, open, close, volume]
+
+  const nowMs = Date.now();
+  const periodMs = seconds * 1000;
+
   const candles: Candle[] = raw
     .map((c) => ({
       time: c[0] * 1000,
@@ -94,6 +79,11 @@ export async function getKlines(interval: string, limit: number): Promise<{ cand
       volume: c[5] ?? 0,
     }))
     .sort((a, b) => a.time - b.time)
+    // FIX #2: Exclude the current in-progress (incomplete) candle.
+    // A candle is complete only when its close time has passed.
+    // Coinbase `time` is the OPEN time, so we exclude candles where
+    // open_time + period > now (i.e. the candle hasn't closed yet).
+    .filter((c) => c.time + periodMs <= nowMs)
     .slice(-limit);
 
   setCached(cacheKey, candles);
@@ -126,24 +116,47 @@ export async function getOrderBookSummary() {
   const cached = getCached<any>(cacheKey, 15_000);
   if (cached) return cached;
 
-  const book = await fetchJson(`${COINBASE_BASE}/products/${PRODUCT}/book?level=2`);
+  const book = await fetchJson(
+    `${COINBASE_BASE}/products/${PRODUCT}/book?level=2`
+  );
   const bidVolume = book.bids
     .slice(0, 100)
     .reduce((acc: number, [, size]: string[]) => acc + parseFloat(size), 0);
   const askVolume = book.asks
     .slice(0, 100)
     .reduce((acc: number, [, size]: string[]) => acc + parseFloat(size), 0);
-  const result = { bidVolume, askVolume, imbalanceRatio: askVolume > 0 ? bidVolume / askVolume : 1 };
+  const result = {
+    bidVolume,
+    askVolume,
+    imbalanceRatio: askVolume > 0 ? bidVolume / askVolume : 1,
+  };
   setCached(cacheKey, result);
   return result;
 }
 
 /**
- * Funding rate / open interest, best-effort via Kraken Futures' public
- * ticker (no key required for read-only market data). Long/Short ratio has
- * no equivalent free, non-geo-restricted source, so it's left null —
- * lib/score.ts already treats null derivative fields as "skip this check"
- * rather than failing, so this degrades cleanly.
+ * FIX #1 — Kraken Futures funding rate correct interpretation.
+ *
+ * Kraken returns TWO funding rate fields in the /tickers response:
+ *
+ *   fundingRate          — the absolute rate per second (very small number,
+ *                          e.g. 1.18e-7). NOT useful for display or scoring.
+ *
+ *   relativeFundingRate  — the rate as a fraction of the mark price per
+ *                          funding period (1h for PF_XBTUSD). This is the
+ *                          number comparable to Binance's funding rate.
+ *                          e.g. 0.0001 = 0.01% per hour.
+ *
+ * The previous code used `fundingRate` (absolute per second) and multiplied
+ * by 100, producing absurd values like 18.66% which is impossible for any
+ * liquid perpetual. The score's Derivados category was voting with corrupted
+ * data every cycle.
+ *
+ * FIX: Use `relativeFundingRate` directly. Multiply by 100 for display as %.
+ *
+ * Open Interest: Kraken returns OI in USD-denominated contracts (each
+ * contract = $1 USD). To convert to BTC, divide by the mark price.
+ * The previous code displayed raw contract count as "BTC" which was wrong.
  */
 export async function getDerivativesSnapshot(): Promise<DerivativesSnapshot> {
   const cacheKey = "derivatives";
@@ -160,27 +173,42 @@ export async function getDerivativesSnapshot(): Promise<DerivativesSnapshot> {
 
   try {
     const data = await fetchJson(KRAKEN_FUTURES_TICKERS, 5000);
-    const ticker = data?.tickers?.find((t: any) => t.symbol === "PF_XBTUSD");
+    const ticker = data?.tickers?.find(
+      (t: any) => t.symbol === "PF_XBTUSD"
+    );
     if (ticker) {
-      result.fundingRate = typeof ticker.fundingRate === "number" ? ticker.fundingRate : null;
-      result.markPrice = typeof ticker.markPrice === "number" ? ticker.markPrice : null;
-      result.openInterest = typeof ticker.openInterest === "number" ? ticker.openInterest : null;
+      // Use relativeFundingRate (comparable to Binance funding rate)
+      // Falls back to fundingRate only if relativeFundingRate is absent
+      const relativeRate =
+        typeof ticker.relativeFundingRate === "number"
+          ? ticker.relativeFundingRate
+          : typeof ticker.fundingRate === "number"
+            ? ticker.fundingRate * 3600 // convert per-second to per-hour
+            : null;
+
+      result.fundingRate = relativeRate;
+      result.markPrice =
+        typeof ticker.markPrice === "number" ? ticker.markPrice : null;
+
+      // Convert OI from USD contracts to BTC
+      if (
+        typeof ticker.openInterest === "number" &&
+        result.markPrice !== null &&
+        result.markPrice > 0
+      ) {
+        result.openInterest = ticker.openInterest / result.markPrice;
+      } else if (typeof ticker.openInterest === "number") {
+        result.openInterest = ticker.openInterest;
+      }
     }
   } catch {
-    /* best-effort only — leave nulls if Kraken Futures is unreachable */
+    /* best-effort only */
   }
 
   setCached(cacheKey, result);
   return result;
 }
 
-/**
- * Whale activity, approximated for free: scan recent public trades and flag
- * any with notional value above a USD threshold. Coinbase's `side` field on
- * the public trades feed indicates the taker's side directly ("buy" or
- * "sell"), so no maker/taker flag-inversion is needed (unlike Binance's
- * `isBuyerMaker`).
- */
 export async function getWhaleSummary(
   thresholdUsd = 250_000,
   windowMinutes = 30
@@ -194,7 +222,10 @@ export async function getWhaleSummary(
   let tradeCount = 0;
 
   try {
-    const trades: any[] = await fetchJson(`${COINBASE_BASE}/products/${PRODUCT}/trades`, 6000);
+    const trades: any[] = await fetchJson(
+      `${COINBASE_BASE}/products/${PRODUCT}/trades`,
+      6000
+    );
     const cutoff = Date.now() - windowMinutes * 60_000;
     trades.forEach((t) => {
       const ts = new Date(t.time).getTime();
@@ -208,7 +239,7 @@ export async function getWhaleSummary(
       else sellVolume += size;
     });
   } catch {
-    /* leave at zero if the trades endpoint is unreachable */
+    /* leave at zero */
   }
 
   const result: WhaleSummary = {
@@ -216,7 +247,12 @@ export async function getWhaleSummary(
     largeTradeThresholdUsd: thresholdUsd,
     buyVolume,
     sellVolume,
-    netDirection: buyVolume > sellVolume * 1.1 ? "bullish" : sellVolume > buyVolume * 1.1 ? "bearish" : "neutral",
+    netDirection:
+      buyVolume > sellVolume * 1.1
+        ? "bullish"
+        : sellVolume > buyVolume * 1.1
+          ? "bearish"
+          : "neutral",
     tradeCount,
   };
   setCached(cacheKey, result);
