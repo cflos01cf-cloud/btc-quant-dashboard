@@ -136,7 +136,7 @@ export default function CandleChart({ candles, indicators }: Props) {
       chart.remove();
       // Series refs are local — no stale pointers remain after chart.remove()
     };
-  }, [candles, ema20, ema50, ema200]);
+  }, [candles, indicators]);
 
   return (
     <div
