@@ -23,7 +23,7 @@ import { DerivativesSnapshot, WhaleSummary } from "../../lib/types";
  * NO ORDER ENDPOINTS are used or imported anywhere in this file.
  */
 
-const SIGNAL_SCORE_THRESHOLD = 60;
+const SIGNAL_SCORE_THRESHOLD = 70;
 // Don't record a new signal if one from the same source is already open —
 // we want to track discrete, non-overlapping signals for clean comparison.
 const MAX_CONCURRENT_OPEN = 1;

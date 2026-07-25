@@ -8,7 +8,7 @@ import { getBtcNews } from "../../lib/news";
 import { computeMaestroScore } from "../../lib/score";
 import { buildSignalRecord, listOpenSignals, saveSignal } from "../../lib/blobstore";
 
-const SIGNAL_SCORE_THRESHOLD = 60;
+const SIGNAL_SCORE_THRESHOLD = 70;
 const MAX_CONCURRENT_OPEN = 1;
 
 /**
