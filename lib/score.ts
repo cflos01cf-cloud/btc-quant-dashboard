@@ -97,8 +97,8 @@ function detectRegime(ind: IndicatorSnapshot, candles: Candle[]): Regime {
  *   Momentum       15
  *   Volumen        20 (was 15)
  *   Smart Money    10 (was 20) — FVG, sweeps, OB, whales only
- *   Sentimiento    10
- *   Derivados      10
+ *   Sentimiento     5 (was 10) — solo extremos ≤25 / ≥75
+ *   Derivados      15 (was 10) — más peso a funding/OI
  *   Noticias       10
  *   ─────────────
  *   Total         100
@@ -269,32 +269,47 @@ function scoreSmartMoney(smcEvents: SmcEvent[], whales: WhaleSummary): CategoryS
   return gradeCategory("smart_money", "Smart Money (microestructura)", checks, 10);
 }
 
+/**
+ * FIX A+B — Sentimiento reducido a 5 pts (era 10) y lógica contraria
+ * restringida a extremos reales (≤25 / ≥75) solamente.
+ *
+ * Problema anterior: Fear & Greed votaba bullish con cualquier valor ≤45
+ * (zona de "miedo moderado"). Esto neutralizaba señales bajistas reales
+ * porque el índice suele estar en zona de miedo durante caídas — exactamente
+ * cuando el sistema debería detectar la tendencia bajista, Sentimiento
+ * votaba en su contra con 10 pts completos.
+ *
+ * Fix A — Peso reducido de 10 a 5 pts: Sentimiento es contexto, no señal
+ * técnica primaria. Las EMAs, ADX y Supertrend son más confiables.
+ *
+ * Fix B — Solo extremos reales activan el voto contrario:
+ *   ≤25 Extreme Fear  → bullish (contrario, zona de capitulación)
+ *   ≥75 Extreme Greed → bearish (contrario, zona de euforia)
+ *   26-74             → neutral (Fear & Greed moderado no es señal)
+ */
 function scoreSentimiento(fearGreed: FearGreed | null): CategoryScore {
-  if (!fearGreed) return gradeCategory("sentimiento", "Sentimiento (Fear & Greed)", [], 10);
+  if (!fearGreed) return gradeCategory("sentimiento", "Sentimiento (Fear & Greed)", [], 5);
   const { value } = fearGreed;
   let direction: Direction = "neutral";
   let weight = 0;
 
   if (value <= 25) {
+    // Extreme Fear → contrarian bullish signal (capitulation zone)
     direction = "bullish";
-    weight = 5 + ((25 - value) / 25) * 5;
-  } else if (value <= 45) {
-    direction = "bullish";
-    weight = 2 + ((45 - value) / 20) * 3;
+    weight = 3 + ((25 - value) / 25) * 2; // 3-5 pts depending on extremity
   } else if (value >= 75) {
+    // Extreme Greed → contrarian bearish signal (euphoria zone)
     direction = "bearish";
-    weight = 5 + ((value - 75) / 25) * 5;
-  } else if (value >= 55) {
-    direction = "bearish";
-    weight = 2 + ((value - 55) / 20) * 3;
+    weight = 3 + ((value - 75) / 25) * 2; // 3-5 pts depending on extremity
   }
+  // 26-74: neutral — moderate fear/greed is not a reliable signal
 
   const checks: ScoreCheck[] =
     direction === "neutral"
-      ? [{ label: "Fear & Greed Index", weight: 1, direction: "neutral", detail: `${value}/100 — ${fearGreed.classification} (neutral)` }]
-      : [{ label: "Fear & Greed Index", weight: Math.round(weight * 10) / 10, direction, detail: `${value}/100 — ${fearGreed.classification}` }];
+      ? [{ label: "Fear & Greed Index", weight: 1, direction: "neutral", detail: `${value}/100 — ${fearGreed.classification} (zona neutral, sin voto)` }]
+      : [{ label: "Fear & Greed Index", weight: Math.round(weight * 10) / 10, direction, detail: `${value}/100 — ${fearGreed.classification} (extremo contrario)` }];
 
-  return gradeCategory("sentimiento", "Sentimiento (Fear & Greed)", checks, 10);
+  return gradeCategory("sentimiento", "Sentimiento (Fear & Greed)", checks, 5);
 }
 
 function scoreDerivados(deriv: DerivativesSnapshot, candles: Candle[]): CategoryScore {
@@ -336,7 +351,7 @@ function scoreDerivados(deriv: DerivativesSnapshot, candles: Candle[]): Category
     });
   }
 
-  return gradeCategory("derivados", "Derivados", checks, 10);
+  return gradeCategory("derivados", "Derivados", checks, 15);
 }
 
 function scoreNoticias(news: NewsHeadline[]): CategoryScore {
