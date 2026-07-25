@@ -1,110 +1,8 @@
 import { Candle, Direction, IndicatorSnapshot } from "./types";
 
 /**
- * FIX #4a — ATR initialization (Wilder-standard, matching TradingView)
- *
- * Previous: applied Wilder smoothing from candle 1 → ATR values 5-15%
- * different from TradingView for the first ~50 candles (SL/TP were
- * calibrated with a biased ATR).
- *
- * Fix: initialize ATR with the SMA of the first `period` True Ranges,
- * then switch to Wilder smoothing — this is exactly what TradingView does.
- * Difference vs TradingView after this fix: < 0.1% on a 300-candle window.
+ * EMA — standard exponential moving average
  */
-export function atr(candles: Candle[], period = 14): number[] {
-  // Step 1: compute True Range for every candle
-  const trs: number[] = candles.map((c, i) => {
-    if (i === 0) return c.high - c.low;
-    const prev = candles[i - 1].close;
-    return Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));
-  });
-
-  const out: number[] = new Array(candles.length).fill(0);
-
-  // Step 2: seed with SMA of the first `period` TRs
-  let seed = 0;
-  for (let i = 0; i < Math.min(period, trs.length); i++) seed += trs[i];
-  const seedATR = seed / Math.min(period, trs.length);
-  out[Math.min(period - 1, trs.length - 1)] = seedATR;
-
-  // Step 3: Wilder smoothing from candle `period` onward
-  let prev = seedATR;
-  for (let i = period; i < trs.length; i++) {
-    const next = (prev * (period - 1) + trs[i]) / period;
-    out[i] = next;
-    prev = next;
-  }
-
-  // Fill early candles with seed (they're warmup; code downstream guards
-  // against the first few values being zero by checking atr14 > 0)
-  for (let i = 0; i < period - 1; i++) out[i] = seedATR;
-
-  return out;
-}
-
-/**
- * FIX #4b — ADX initialization (Wilder-standard, matching TradingView)
- *
- * Same issue as ATR: previous code applied Wilder from bar 1.
- * TradingView seeds with SMA of the first `period` DM/TR values.
- */
-export function adx(candles: Candle[], period = 14) {
-  const plusDM: number[] = [0];
-  const minusDM: number[] = [0];
-  const tr: number[] = [candles[0].high - candles[0].low];
-
-  for (let i = 1; i < candles.length; i++) {
-    const upMove = candles[i].high - candles[i - 1].high;
-    const downMove = candles[i - 1].low - candles[i].low;
-    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
-    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
-    tr.push(Math.max(
-      candles[i].high - candles[i].low,
-      Math.abs(candles[i].high - candles[i - 1].close),
-      Math.abs(candles[i].low - candles[i - 1].close)
-    ));
-  }
-
-  // Standard Wilder smoothing seeded with SMA
-  function wilderStandard(arr: number[]): number[] {
-    const out = new Array(arr.length).fill(0);
-    let seed = 0;
-    for (let i = 0; i < Math.min(period, arr.length); i++) seed += arr[i];
-    seed /= Math.min(period, arr.length);
-    out[Math.min(period - 1, arr.length - 1)] = seed;
-    let prev = seed;
-    for (let i = period; i < arr.length; i++) {
-      const next = prev - prev / period + arr[i];
-      out[i] = next;
-      prev = next;
-    }
-    for (let i = 0; i < period - 1; i++) out[i] = seed;
-    return out;
-  }
-
-  const smoothTR = wilderStandard(tr);
-  const smoothPlusDM = wilderStandard(plusDM);
-  const smoothMinusDM = wilderStandard(minusDM);
-
-  const diPlus = smoothPlusDM.map((v, i) =>
-    smoothTR[i] > 0 ? (v / smoothTR[i]) * 100 : 0
-  );
-  const diMinus = smoothMinusDM.map((v, i) =>
-    smoothTR[i] > 0 ? (v / smoothTR[i]) * 100 : 0
-  );
-  const dx = diPlus.map((v, i) => {
-    const sum = v + diMinus[i];
-    return sum > 0 ? (Math.abs(v - diMinus[i]) / sum) * 100 : 0;
-  });
-
-  // ADX = Wilder-smoothed DX (also seeded with SMA)
-  const adxOut = wilderStandard(dx);
-
-  return { adx: adxOut, diPlus, diMinus };
-}
-
-// ── All other indicators unchanged ─────────────────────────────────────────
-
 export function ema(values: number[], period: number): number[] {
   const k = 2 / (period + 1);
   const out: number[] = [];
@@ -127,6 +25,107 @@ export function sma(values: number[], period: number): number[] {
     out.push(sum / Math.min(i + 1, period));
   }
   return out;
+}
+
+/**
+ * FIX #4a — ATR with correct TradingView-standard Wilder initialization.
+ * Seed = SMA of first `period` True Ranges, then Wilder smoothing.
+ */
+export function atr(candles: Candle[], period = 14): number[] {
+  const trs: number[] = candles.map((c, i) => {
+    if (i === 0) return c.high - c.low;
+    const prev = candles[i - 1].close;
+    return Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));
+  });
+
+  const out: number[] = new Array(candles.length).fill(0);
+  // Seed with SMA of first `period` TRs
+  let seed = 0;
+  for (let i = 0; i < Math.min(period, trs.length); i++) seed += trs[i];
+  const seedATR = seed / Math.min(period, trs.length);
+  out[Math.min(period - 1, trs.length - 1)] = seedATR;
+
+  let prev = seedATR;
+  for (let i = period; i < trs.length; i++) {
+    const next = (prev * (period - 1) + trs[i]) / period;
+    out[i] = next;
+    prev = next;
+  }
+  for (let i = 0; i < period - 1; i++) out[i] = seedATR;
+  return out;
+}
+
+/**
+ * FIX #4b — ADX with correct Wilder initialization.
+ *
+ * CRITICAL BUG in previous fix: wilderStandard() seeded with SMA (sum/period)
+ * instead of the raw SUM. This made smoothedTR ~14x too small, causing DI+/DI-
+ * to be divided by a tiny number → values like 446 instead of 0-100.
+ *
+ * TradingView Pine Script (authoritative reference):
+ *   smoothedTR  := na(smoothedTR[1]) ? math.sum(tr, 14) : smoothedTR[1] - smoothedTR[1]/14 + tr
+ *
+ * The seed is math.sum(tr, 14) = the RAW SUM, not the average.
+ * After that, Wilder's formula: smoothed[i] = smoothed[i-1] - smoothed[i-1]/period + raw[i]
+ *
+ * ADX is then: wilderSmooth(DX) / period to normalize to 0-100.
+ */
+export function adx(candles: Candle[], period = 14) {
+  if (candles.length < period + 1) {
+    const neutral = new Array(candles.length).fill(0);
+    return { adx: neutral, diPlus: neutral, diMinus: neutral };
+  }
+
+  const plusDM: number[] = [0];
+  const minusDM: number[] = [0];
+  const tr: number[] = [candles[0].high - candles[0].low];
+
+  for (let i = 1; i < candles.length; i++) {
+    const upMove = candles[i].high - candles[i - 1].high;
+    const downMove = candles[i - 1].low - candles[i].low;
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    tr.push(Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close)
+    ));
+  }
+
+  // Wilder smoothing with CORRECT seed = raw SUM (not average)
+  function wilderSmooth(arr: number[]): number[] {
+    const out = new Array(arr.length).fill(0);
+    // Seed = sum of first `period` values
+    let seed = 0;
+    for (let i = 0; i < period; i++) seed += arr[i];
+    out[period - 1] = seed;
+    for (let i = period; i < arr.length; i++) {
+      out[i] = out[i - 1] - out[i - 1] / period + arr[i];
+    }
+    for (let i = 0; i < period - 1; i++) out[i] = seed;
+    return out;
+  }
+
+  const smoothTR = wilderSmooth(tr);
+  const smoothPlusDM = wilderSmooth(plusDM);
+  const smoothMinusDM = wilderSmooth(minusDM);
+
+  const diPlus = smoothPlusDM.map((v, i) =>
+    smoothTR[i] > 0 ? (v / smoothTR[i]) * 100 : 0
+  );
+  const diMinus = smoothMinusDM.map((v, i) =>
+    smoothTR[i] > 0 ? (v / smoothTR[i]) * 100 : 0
+  );
+  const dx = diPlus.map((v, i) => {
+    const sum = v + diMinus[i];
+    return sum > 0 ? (Math.abs(v - diMinus[i]) / sum) * 100 : 0;
+  });
+
+  const smoothDX = wilderSmooth(dx);
+  // ADX = smoothedDX / period to normalize to 0-100
+  const adxOut = smoothDX.map((v) => Math.min(100, Math.max(0, v / period)));
+
+  return { adx: adxOut, diPlus, diMinus };
 }
 
 export function rsi(closes: number[], period = 14): number[] {
@@ -300,6 +299,8 @@ export function volumeProfilePoc(candles: Candle[], bins = 24) {
 }
 
 export function buildIndicatorSnapshot(candles: Candle[]): IndicatorSnapshot {
+  if (candles.length === 0) throw new Error("buildIndicatorSnapshot: empty candles array");
+
   const closes = candles.map((c) => c.close);
   const volumes = candles.map((c) => c.volume);
   const last = closes.length - 1;
