@@ -13,8 +13,7 @@ import {
   buildDemoOrderBook,
   buildDemoWhales,
 } from "@/lib/demoData";
-import { buildIndicatorSnapshot } from "@/lib/indicators";
-import { detectSmcEvents } from "@/lib/smc";
+import { buildIndicatorSnapshot, ema } from "@/lib/indicators";import { detectSmcEvents } from "@/lib/smc";
 import { getFearGreedIndex } from "@/lib/feargreed";
 import { getBtcNews } from "@/lib/news";
 import { computeMaestroScore } from "@/lib/score";
@@ -142,6 +141,15 @@ function buildPayload(args: {
   dataNotes: string[];
 }): BtcDashboardPayload {
   const indicators = buildIndicatorSnapshot(args.candles);
+  const closes = args.candles.map((c) => c.close);
+  const ema20arr = ema(closes, 20);
+  const ema50arr = ema(closes, 50);
+  const ema200arr = ema(closes, 200);
+  const emaSeries = {
+    ema20: args.candles.map((c, i) => ({ time: c.time, value: ema20arr[i] })),
+    ema50: args.candles.map((c, i) => ({ time: c.time, value: ema50arr[i] })),
+    ema200: args.candles.map((c, i) => ({ time: c.time, value: ema200arr[i] })),
+  };
   const smcEvents = detectSmcEvents(args.candles);
   const maestro = computeMaestroScore({
     indicators,
@@ -154,7 +162,11 @@ function buildPayload(args: {
     news: args.news,
   });
 
-  return {
+  return {    emaSeries: {
+      ema20: emaSeries.ema20.slice(-150),
+      ema50: emaSeries.ema50.slice(-150),
+      ema200: emaSeries.ema200.slice(-150),
+    },
     source: args.source,
     warning: args.warning,
     fetchedAt: Date.now(),

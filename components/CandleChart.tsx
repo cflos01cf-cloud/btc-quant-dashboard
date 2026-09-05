@@ -12,6 +12,11 @@ import {
 } from "lightweight-charts";
 import { Candle } from "@/lib/types";
 
+interface EmaPoint {
+  time: number; // ms epoch
+  value: number;
+}
+
 interface Props {
   candles: Candle[];
   indicators: {
@@ -19,27 +24,20 @@ interface Props {
     ema50: number;
     ema200: number;
   };
+  emaSeries?: {
+    ema20: EmaPoint[];
+    ema50: EmaPoint[];
+    ema200: EmaPoint[];
+  };
 }
 
 /**
- * FIX #9 — Memory leak and race condition in CandleChart.
- *
- * Previous issues:
- * 1. Two separate useEffects — one for chart init, one for data updates.
- *    If `candles` changed before the first effect had mounted the chart,
- *    the second effect tried to call setData() on undefined series refs,
- *    causing silent errors and dangling event listeners.
- *
- * 2. The cleanup function only called chart.remove() but the series refs
- *    still pointed to garbage-collected objects in the next render cycle,
- *    causing "Cannot read properties of null" errors in production.
- *
- * Fix: single useEffect that owns the full lifecycle (create → update → destroy).
- * Series refs are local to each effect invocation, not stored in useRef,
- * so they can never be stale. A mounted flag guards against updates after
- * the component has unmounted (React StrictMode double-invoke protection).
+ * FIX — CandleChart now uses real EMA series data from the API instead of
+ * a linear approximation. If emaSeries is provided (new API format), it draws
+ * the actual computed EMA values per candle. Falls back to the approximation
+ * if emaSeries is not available (backward compatibility).
  */
-export default function CandleChart({ candles, indicators }: Props) {
+export default function CandleChart({ candles, indicators, emaSeries }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,7 +46,6 @@ export default function CandleChart({ candles, indicators }: Props) {
     const { ema20, ema50, ema200 } = indicators;
     let mounted = true;
 
-    // ── Chart creation ──────────────────────────────────────────────────────
     const chart: IChartApi = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
@@ -92,7 +89,6 @@ export default function CandleChart({ candles, indicators }: Props) {
       title: "EMA200",
     });
 
-    // ── Data update ─────────────────────────────────────────────────────────
     if (mounted) {
       const candleData: CandlestickData[] = candles.map((c) => ({
         time: Math.floor(c.time / 1000) as any,
@@ -102,26 +98,34 @@ export default function CandleChart({ candles, indicators }: Props) {
         close: c.close,
       }));
 
-      // Build approximate EMA lines by projecting backward from the last value.
-      // A full EMA series would require passing all historical closes here;
-      // for display purposes this linear approximation is visually correct.
-      const emaLine = (value: number): LineData[] =>
-        candles.map((c, i) => ({
-          time: Math.floor(c.time / 1000) as any,
-          value:
-            value +
-            ((candles[i].close - value) * (i / candles.length)) * 0.1,
-        }));
-
       candleSeries.setData(candleData);
-      ema20Series.setData(emaLine(ema20));
-      ema50Series.setData(emaLine(ema50));
-      ema200Series.setData(emaLine(ema200));
+
+      if (emaSeries && emaSeries.ema20.length > 0) {
+        // Use real EMA series from API
+        ema20Series.setData(
+          emaSeries.ema20.map((p) => ({ time: Math.floor(p.time / 1000) as any, value: p.value }))
+        );
+        ema50Series.setData(
+          emaSeries.ema50.map((p) => ({ time: Math.floor(p.time / 1000) as any, value: p.value }))
+        );
+        ema200Series.setData(
+          emaSeries.ema200.map((p) => ({ time: Math.floor(p.time / 1000) as any, value: p.value }))
+        );
+      } else {
+        // Fallback: linear approximation (old behavior)
+        const emaLine = (value: number): LineData[] =>
+          candles.map((c, i) => ({
+            time: Math.floor(c.time / 1000) as any,
+            value: value + ((candles[i].close - value) * (i / candles.length)) * 0.1,
+          }));
+        ema20Series.setData(emaLine(ema20));
+        ema50Series.setData(emaLine(ema50));
+        ema200Series.setData(emaLine(ema200));
+      }
 
       chart.timeScale().fitContent();
     }
 
-    // ── Resize handler ──────────────────────────────────────────────────────
     const handleResize = () => {
       if (mounted && containerRef.current) {
         chart.applyOptions({ width: containerRef.current.clientWidth });
@@ -129,14 +133,12 @@ export default function CandleChart({ candles, indicators }: Props) {
     };
     window.addEventListener("resize", handleResize);
 
-    // ── Cleanup (single point of truth) ────────────────────────────────────
     return () => {
       mounted = false;
       window.removeEventListener("resize", handleResize);
       chart.remove();
-      // Series refs are local — no stale pointers remain after chart.remove()
     };
-  }, [candles, indicators]);
+  }, [candles, indicators, emaSeries]);
 
   return (
     <div
