@@ -185,7 +185,7 @@ function buildPayload(args: {
     fearGreed: args.fearGreed,
     news: args.news,
     maestro,
-    candles: args.candles.slice(-150),
+    candles: args.candles.slice(-300),
     dataNotes: args.dataNotes,
   };
 }
