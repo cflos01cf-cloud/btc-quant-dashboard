@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const base = await getLiveBtcData(interval, 300);
-const chartBase = interval === "1h" ? base : await getLiveBtcData("1h", 300);
+const chartBase = interval === "1h" ? base : await getLiveBtcData("1h", 500);
     const dataNotes: string[] = [];
 
     // Each secondary data source is fetched independently with its own
@@ -168,9 +168,9 @@ function buildPayload(args: {
   });
 
   return {    emaSeries: {
-      ema20: emaSeries.ema20.slice(-300),
-      ema50: emaSeries.ema50.slice(-300),
-      ema200: emaSeries.ema200.slice(-300),
+      ema20: emaSeries.ema20.slice(-500),
+      ema50: emaSeries.ema50.slice(-500),
+      ema200: emaSeries.ema200.slice(-500),
     },
     source: args.source,
     warning: args.warning,
