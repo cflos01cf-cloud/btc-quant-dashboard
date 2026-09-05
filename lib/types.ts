@@ -149,6 +149,11 @@ export interface BtcDashboardPayload {
   whales: WhaleSummary;
   derivatives: DerivativesSnapshot;
   fearGreed: FearGreed | null;
+  emaSeries?: {
+    ema20: { time: number; value: number }[];
+    ema50: { time: number; value: number }[];
+    ema200: { time: number; value: number }[];
+  };
   news: NewsHeadline[];
   maestro: MaestroScore;
   candles: Candle[];
