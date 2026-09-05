@@ -150,11 +150,6 @@ function buildPayload(args: {
   const ema50arr = ema(chartCloses, 50);
   const ema200arr = ema(chartCloses, 200);
   const emaSeries = {
-    ema20: chartC.map((c, i) => ({ time: c.time, value: ema20arr[i] })),
-    ema50: chartC.map((c, i) => ({ time: c.time, value: ema50arr[i] })),
-    ema200: chartC.map((c, i) => ({ time: c.time, value: ema200arr[i] })),
-  };
-  const emaSeries = {
     ema20: args.candles.map((c, i) => ({ time: c.time, value: ema20arr[i] })),
     ema50: args.candles.map((c, i) => ({ time: c.time, value: ema50arr[i] })),
     ema200: args.candles.map((c, i) => ({ time: c.time, value: ema200arr[i] })),
