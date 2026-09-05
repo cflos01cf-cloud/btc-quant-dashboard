@@ -31,7 +31,7 @@ export const maxDuration = 25;
 
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get("mode") === "demo" ? "demo" : "live";
-  const interval = req.nextUrl.searchParams.get("interval") || "15m";
+  const interval = req.nextUrl.searchParams.get("interval") || "1h";
 
   if (mode === "demo") {
     return NextResponse.json(
@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const base = await getLiveBtcData(interval, 300);
+const chartBase = interval === "1h" ? base : await getLiveBtcData("1h", 300);
     const dataNotes: string[] = [];
 
     // Each secondary data source is fetched independently with its own
@@ -71,7 +72,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       buildPayload({
         source: "live",
-        candles: base.candles,
+        candles: chartBase.candles,
         orderBook: base.orderBook,
         derivatives,
         whales,
@@ -163,9 +164,9 @@ function buildPayload(args: {
   });
 
   return {    emaSeries: {
-      ema20: emaSeries.ema20.slice(-150),
-      ema50: emaSeries.ema50.slice(-150),
-      ema200: emaSeries.ema200.slice(-150),
+      ema20: emaSeries.ema20.slice(-300),
+      ema50: emaSeries.ema50.slice(-300),
+      ema200: emaSeries.ema200.slice(-300),
     },
     source: args.source,
     warning: args.warning,
