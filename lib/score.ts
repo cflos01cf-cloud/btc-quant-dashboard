@@ -31,44 +31,19 @@ function gradeCategory(
   return { id, label, points, max, direction, checks };
 }
 
-/**
- * FIX #7 — Market regime detection.
- *
- * Previous engine only knew bullish/bearish. In a ranging/consolidating
- * market it would alternate randomly producing false signals. Now it
- * detects 5 regimes and adjusts scoring accordingly:
- *
- *   trending_up    → normal bullish scoring
- *   trending_down  → normal bearish scoring
- *   ranging        → score halved; signals blocked (ADX < 20 + BB squeeze)
- *   breakout_up    → 1.2x bonus (high conviction emerging trend)
- *   breakout_down  → 1.2x bonus
- */
-type Regime =
-  | "trending_up"
-  | "trending_down"
-  | "ranging"
-  | "breakout_up"
-  | "breakout_down";
+type Regime = "trending_up" | "trending_down" | "ranging" | "breakout_up" | "breakout_down";
 
 function detectRegime(ind: IndicatorSnapshot, candles: Candle[]): Regime {
   const last = candles[candles.length - 1];
   const prev = candles[Math.max(0, candles.length - 5)];
-
-  // Band width relative to price — squeeze = < 1.5%
   const bandWidth = ind.bbUpper - ind.bbLower;
-  const squeeze = bandWidth / ind.bbMid < 0.015;
-
-  // ADX < 20 = no trend
   const noTrend = ind.adx14 < 15;
-
-  if (noTrend) return "ranging";
-
   const priceMove = (last.close - prev.close) / prev.close;
   const prevBandWidth = (ind.bbUpper - ind.bbLower) / ind.bbMid;
 
+  if (noTrend) return "ranging";
+
   if (!noTrend) {
-    // Expanding bands + price breaking out = breakout
     if (priceMove > 0.01 && prevBandWidth > 0.015) return "breakout_up";
     if (priceMove < -0.01 && prevBandWidth > 0.015) return "breakout_down";
     return ind.diPlus > ind.diMinus ? "trending_up" : "trending_down";
@@ -77,34 +52,27 @@ function detectRegime(ind: IndicatorSnapshot, candles: Candle[]): Regime {
   return "ranging";
 }
 
-/**
- * FIX #6 — Removed double counting between Tendencia and Smart Money.
- *
- * Previous issue: BOS/CHOCH (Smart Money) and EMA200/EMA cross (Tendencia)
- * both vote on "is the market going up/down long-term?" — the same question,
- * twice, with 20+20 = 40 pts weight.
- *
- * Fix: Smart Money now focuses exclusively on SHORT-TERM price action
- * microstructure (FVG, liquidity sweeps, order blocks, whale activity) —
- * NOT on market structure (BOS/CHOCH). BOS/CHOCH is moved to Tendencia
- * where it belongs conceptually (it IS a trend continuation/change signal).
- * Smart Money max is reduced from 20 to 15 pts to reflect this narrower scope.
- * The freed 5 pts are redistributed to Volumen (now 20 pts) to give volume
- * confirmation more weight — crucial for crypto.
- *
- * New point distribution (still 100 total):
- *   Tendencia      25 (was 20) — adds BOS/CHOCH
- *   Momentum       15
- *   Volumen        20 (was 15)
- *   Smart Money    10 (was 20) — FVG, sweeps, OB, whales only
- *   Sentimiento     5 (was 10) — solo extremos ≤25 / ≥75
- *   Derivados      15 (was 10) — más peso a funding/OI
- *   Noticias       10
- *   ─────────────
- *   Total         100
- */
-
 function scoreTendencia(ind: IndicatorSnapshot, smcEvents: SmcEvent[]): CategoryScore {
+  /**
+   * FIX 1 — ADX+DI: when ADX < 15, vote in the direction of the dominant DI
+   * with reduced weight (2 instead of 5) instead of neutral.
+   * Previously: neutral when ADX < 20 → lost 5 pts even with clear DI direction.
+   * Now: always votes, just with less conviction when trend is weak.
+   */
+  let adxDirection: Direction;
+  let adxWeight: number;
+  if (ind.adx14 >= 20) {
+    adxDirection = ind.diPlus > ind.diMinus ? "bullish" : "bearish";
+    adxWeight = 5;
+  } else if (ind.adx14 >= 15) {
+    adxDirection = ind.diPlus > ind.diMinus ? "bullish" : "bearish";
+    adxWeight = 3;
+  } else {
+    // ADX < 15: very weak trend, vote DI direction with minimal weight
+    adxDirection = ind.diPlus > ind.diMinus ? "bullish" : "bearish";
+    adxWeight = 2;
+  }
+
   const checks: ScoreCheck[] = [
     {
       label: "Precio vs EMA200",
@@ -120,13 +88,8 @@ function scoreTendencia(ind: IndicatorSnapshot, smcEvents: SmcEvent[]): Category
     },
     {
       label: "ADX(14) + DI",
-      weight: 5,
-      direction:
-        ind.adx14 > 20 && ind.diPlus > ind.diMinus
-          ? "bullish"
-          : ind.adx14 > 20 && ind.diMinus > ind.diPlus
-            ? "bearish"
-            : "neutral",
+      weight: adxWeight,
+      direction: adxDirection,
       detail: `ADX ${ind.adx14.toFixed(1)} · DI+ ${ind.diPlus.toFixed(1)} / DI- ${ind.diMinus.toFixed(1)}`,
     },
     {
@@ -137,10 +100,7 @@ function scoreTendencia(ind: IndicatorSnapshot, smcEvents: SmcEvent[]): Category
     },
   ];
 
-  // BOS/CHOCH moved here from Smart Money (they are trend structure signals)
-  const bosChoch = smcEvents.filter(
-    (e) => e.type === "BOS" || e.type === "CHOCH"
-  );
+  const bosChoch = smcEvents.filter((e) => e.type === "BOS" || e.type === "CHOCH");
   if (bosChoch.length > 0) {
     const latest = bosChoch[bosChoch.length - 1];
     checks.push({
@@ -155,12 +115,27 @@ function scoreTendencia(ind: IndicatorSnapshot, smcEvents: SmcEvent[]): Category
 }
 
 function scoreMomentum(ind: IndicatorSnapshot): CategoryScore {
-  const stochDir: Direction =
-    ind.stochRsiK > ind.stochRsiD && ind.stochRsiK < 80
-      ? "bullish"
-      : ind.stochRsiK < ind.stochRsiD && ind.stochRsiK > 20
-        ? "bearish"
-        : "neutral";
+  /**
+   * FIX 2 — StochRSI neutral: when StochRSI is in middle zone (not overbought/oversold),
+   * use MACD direction as tiebreaker instead of voting neutral.
+   * Previously: neutral when K not crossing D in OB/OS zone → lost 4 pts.
+   * Now: votes MACD direction with weight 2 when neutral (less conviction).
+   */
+  let stochDir: Direction;
+  let stochWeight: number;
+  const stochInExtreme = ind.stochRsiK > 80 || ind.stochRsiK < 20;
+  if (ind.stochRsiK > ind.stochRsiD && ind.stochRsiK < 80) {
+    stochDir = "bullish";
+    stochWeight = 4;
+  } else if (ind.stochRsiK < ind.stochRsiD && ind.stochRsiK > 20) {
+    stochDir = "bearish";
+    stochWeight = 4;
+  } else {
+    // Neutral zone — use MACD as tiebreaker with reduced weight
+    stochDir = ind.macd > ind.macdSignal ? "bullish" : "bearish";
+    stochWeight = 2;
+  }
+
   const checks: ScoreCheck[] = [
     {
       label: "RSI(14)",
@@ -176,9 +151,9 @@ function scoreMomentum(ind: IndicatorSnapshot): CategoryScore {
     },
     {
       label: "Stochastic RSI",
-      weight: 4,
+      weight: stochWeight,
       direction: stochDir,
-      detail: `%K ${ind.stochRsiK.toFixed(0)} / %D ${ind.stochRsiD.toFixed(0)}`,
+      detail: `%K ${ind.stochRsiK.toFixed(0)} / %D ${ind.stochRsiD.toFixed(0)}${stochInExtreme ? "" : " (MACD tiebreaker)"}`,
     },
     {
       label: "Parabolic SAR",
@@ -197,10 +172,28 @@ function scoreVolumen(
 ): CategoryScore {
   const volAboveAvg = ind.lastVolume > ind.avgVolume20 * 1.05;
   const volDir: Direction = volAboveAvg
-    ? lastCandleUp
-      ? "bullish"
-      : "bearish"
+    ? lastCandleUp ? "bullish" : "bearish"
     : ind.obvSlope;
+
+  /**
+   * FIX 3 — Order book neutral: when imbalance ratio is between 0.9-1.1 (neutral),
+   * use OBV slope as tiebreaker instead of voting neutral.
+   * Previously: neutral when ratio 0.9-1.1 → lost 5 pts.
+   * Now: votes OBV direction with weight 3 when neutral (less conviction).
+   */
+  let obDir: Direction;
+  let obWeight: number;
+  if (orderBook.imbalanceRatio > 1.1) {
+    obDir = "bullish";
+    obWeight = 5;
+  } else if (orderBook.imbalanceRatio < 0.9) {
+    obDir = "bearish";
+    obWeight = 5;
+  } else {
+    // Neutral order book — use OBV as tiebreaker
+    obDir = ind.obvSlope;
+    obWeight = 3;
+  }
 
   const checks: ScoreCheck[] = [
     {
@@ -225,34 +218,25 @@ function scoreVolumen(
     },
     {
       label: "Imbalance del order book",
-      weight: 5,
-      direction:
-        orderBook.imbalanceRatio > 1.1
-          ? "bullish"
-          : orderBook.imbalanceRatio < 0.9
-            ? "bearish"
-            : "neutral",
-      detail: `Ratio bid/ask: ${orderBook.imbalanceRatio.toFixed(2)}`,
+      weight: obWeight,
+      direction: obDir,
+      detail: `Ratio bid/ask: ${orderBook.imbalanceRatio.toFixed(2)}${obWeight < 5 ? " (OBV tiebreaker)" : ""}`,
     },
   ];
   return gradeCategory("volumen", "Volumen", checks, 20);
 }
 
 function scoreSmartMoney(smcEvents: SmcEvent[], whales: WhaleSummary): CategoryScore {
-  // BOS/CHOCH excluded here (moved to Tendencia). Only microstructure remains.
-  const microEvents = smcEvents.filter(
-    (e) => e.type !== "BOS" && e.type !== "CHOCH"
-  );
+  const microEvents = smcEvents.filter((e) => e.type !== "BOS" && e.type !== "CHOCH");
 
-  const weightByType: Record<string, number> = {
-    FVG: 2,
-    LIQUIDITY_SWEEP: 4,
-    ORDER_BLOCK: 4,
-  };
-
+  /**
+   * FIX 4 — Equalize Smart Money weights: previously OBs weighed 4 and FVGs weighed 2,
+   * causing 2 bearish OBs (8 pts) to always override 2 bullish FVGs (4 pts).
+   * Now all microstructure events weigh 3 each for fair competition.
+   */
   const checks: ScoreCheck[] = microEvents.map((e) => ({
     label: e.label,
-    weight: weightByType[e.type] ?? 2,
+    weight: 3,
     direction: e.direction,
     detail: e.detail,
   }));
@@ -269,24 +253,6 @@ function scoreSmartMoney(smcEvents: SmcEvent[], whales: WhaleSummary): CategoryS
   return gradeCategory("smart_money", "Smart Money (microestructura)", checks, 10);
 }
 
-/**
- * FIX A+B — Sentimiento reducido a 5 pts (era 10) y lógica contraria
- * restringida a extremos reales (≤25 / ≥75) solamente.
- *
- * Problema anterior: Fear & Greed votaba bullish con cualquier valor ≤45
- * (zona de "miedo moderado"). Esto neutralizaba señales bajistas reales
- * porque el índice suele estar en zona de miedo durante caídas — exactamente
- * cuando el sistema debería detectar la tendencia bajista, Sentimiento
- * votaba en su contra con 10 pts completos.
- *
- * Fix A — Peso reducido de 10 a 5 pts: Sentimiento es contexto, no señal
- * técnica primaria. Las EMAs, ADX y Supertrend son más confiables.
- *
- * Fix B — Solo extremos reales activan el voto contrario:
- *   ≤25 Extreme Fear  → bullish (contrario, zona de capitulación)
- *   ≥75 Extreme Greed → bearish (contrario, zona de euforia)
- *   26-74             → neutral (Fear & Greed moderado no es señal)
- */
 function scoreSentimiento(fearGreed: FearGreed | null): CategoryScore {
   if (!fearGreed) return gradeCategory("sentimiento", "Sentimiento (Fear & Greed)", [], 5);
   const { value } = fearGreed;
@@ -294,19 +260,16 @@ function scoreSentimiento(fearGreed: FearGreed | null): CategoryScore {
   let weight = 0;
 
   if (value <= 25) {
-    // Extreme Fear → contrarian bullish signal (capitulation zone)
     direction = "bullish";
-    weight = 3 + ((25 - value) / 25) * 2; // 3-5 pts depending on extremity
+    weight = 3 + ((25 - value) / 25) * 2;
   } else if (value >= 75) {
-    // Extreme Greed → contrarian bearish signal (euphoria zone)
     direction = "bearish";
-    weight = 3 + ((value - 75) / 25) * 2; // 3-5 pts depending on extremity
+    weight = 3 + ((value - 75) / 25) * 2;
   }
-  // 26-74: neutral — moderate fear/greed is not a reliable signal
 
   const checks: ScoreCheck[] =
     direction === "neutral"
-      ? [{ label: "Fear & Greed Index", weight: 1, direction: "neutral", detail: `${value}/100 — ${fearGreed.classification} (zona neutral, sin voto)` }]
+      ? [{ label: "Fear & Greed Index", weight: 1, direction: "neutral", detail: `${value}/100 — ${fearGreed.classification} (zona neutral)` }]
       : [{ label: "Fear & Greed Index", weight: Math.round(weight * 10) / 10, direction, detail: `${value}/100 — ${fearGreed.classification} (extremo contrario)` }];
 
   return gradeCategory("sentimiento", "Sentimiento (Fear & Greed)", checks, 5);
@@ -317,9 +280,8 @@ function scoreDerivados(deriv: DerivativesSnapshot, candles: Candle[]): Category
 
   if (deriv.fundingRate !== null) {
     let dir: Direction = "neutral";
-    // Per-hour thresholds (after the fix using PI_XBTUSD per-second × 3600)
-    if (deriv.fundingRate > 0.0005) dir = "bearish";   // > 0.05%/h = longs cargados
-    else if (deriv.fundingRate < -0.0003) dir = "bullish"; // < -0.03%/h = shorts cargados
+    if (deriv.fundingRate > 0.0005) dir = "bearish";
+    else if (deriv.fundingRate < -0.0003) dir = "bullish";
     checks.push({
       label: "Funding rate",
       weight: 4,
@@ -376,8 +338,6 @@ export function computeMaestroScore(args: {
 }): MaestroScore {
   const lastCandle = args.candles[args.candles.length - 1];
   const lastCandleUp = lastCandle.close >= lastCandle.open;
-
-  // FIX #7: detect regime before scoring
   const regime = detectRegime(args.indicators, args.candles);
 
   const categories: CategoryScore[] = [
@@ -404,12 +364,10 @@ export function computeMaestroScore(args: {
     .filter((c) => c.direction === direction)
     .reduce((s, c) => s + c.points, 0);
 
-  // FIX #7: ranging market penalty — halve the score and block signals
+  // Regime adjustments
   if (regime === "ranging") {
     total = total * 0.8;
   }
-
-  // Breakout bonus — 20% uplift when a confirmed emerging trend is detected
   if (
     (regime === "breakout_up" && direction === "bullish") ||
     (regime === "breakout_down" && direction === "bearish")
