@@ -406,7 +406,7 @@ export function computeMaestroScore(args: {
 
   // FIX #7: ranging market penalty — halve the score and block signals
   if (regime === "ranging") {
-    total = total * 0.5;
+    total = total * 0.8;
   }
 
   // Breakout bonus — 20% uplift when a confirmed emerging trend is detected
