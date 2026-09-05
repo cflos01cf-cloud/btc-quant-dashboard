@@ -13,7 +13,7 @@ import {
   WhaleSummary,
 } from "./types";
 
-const THRESHOLD = 85;
+const THRESHOLD = 75;
 
 function gradeCategory(
   id: string,
