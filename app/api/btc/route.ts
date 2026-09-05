@@ -73,6 +73,7 @@ const chartBase = interval === "1h" ? base : await getLiveBtcData("1h", 300);
       buildPayload({
         source: "live",
         candles: chartBase.candles,
+        chartCandles: chartBase.candles,
         orderBook: base.orderBook,
         derivatives,
         whales,
@@ -127,7 +128,7 @@ async function safeFetch<T>(
 function buildPayload(args: {
   source: "live" | "demo";
   warning?: string;
-  candles: Candle[];
+    chartCandles?: Candle[];
   orderBook: { bidVolume: number; askVolume: number; imbalanceRatio: number };
   derivatives: DerivativesSnapshot;
   whales: WhaleSummary;
@@ -143,9 +144,16 @@ function buildPayload(args: {
 }): BtcDashboardPayload {
   const indicators = buildIndicatorSnapshot(args.candles);
   const closes = args.candles.map((c) => c.close);
-  const ema20arr = ema(closes, 20);
-  const ema50arr = ema(closes, 50);
-  const ema200arr = ema(closes, 200);
+    const chartC = (args.chartCandles ?? args.candles);
+  const chartCloses = chartC.map((c) => c.close);
+  const ema20arr = ema(chartCloses, 20);
+  const ema50arr = ema(chartCloses, 50);
+  const ema200arr = ema(chartCloses, 200);
+  const emaSeries = {
+    ema20: chartC.map((c, i) => ({ time: c.time, value: ema20arr[i] })),
+    ema50: chartC.map((c, i) => ({ time: c.time, value: ema50arr[i] })),
+    ema200: chartC.map((c, i) => ({ time: c.time, value: ema200arr[i] })),
+  };
   const emaSeries = {
     ema20: args.candles.map((c, i) => ({ time: c.time, value: ema20arr[i] })),
     ema50: args.candles.map((c, i) => ({ time: c.time, value: ema50arr[i] })),
