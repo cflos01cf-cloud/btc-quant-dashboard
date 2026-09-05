@@ -25,7 +25,7 @@ export default async () => {
   const chatId = process.env.TELEGRAM_CHAT_ID;
 
   try {
-    const base = await getLiveBtcData("1h", 300);
+    const base = await getLiveBtcData("4h", 300));
     const [derivatives, whales, fearGreed, news] = await Promise.all([
       getDerivativesSnapshot().catch(() => ({
         fundingRate: null,
