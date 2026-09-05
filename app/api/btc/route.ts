@@ -128,7 +128,7 @@ async function safeFetch<T>(
 function buildPayload(args: {
   source: "live" | "demo";
   warning?: string;
-      candles?: Candle[];
+        candles: Candle[];
   chartCandles?: Candle[];
   orderBook: { bidVolume: number; askVolume: number; imbalanceRatio: number };
   derivatives: DerivativesSnapshot;
@@ -143,7 +143,7 @@ function buildPayload(args: {
   resolvedInterval: string;
   dataNotes: string[];
 }): BtcDashboardPayload {
-  const indicators = buildIndicatorSnapshot(args.candles);
+    const indicators = buildIndicatorSnapshot(args.candles ?? []);
   const closes = args.candles.map((c) => c.close);
     const chartC = (args.chartCandles ?? args.candles);
   const chartCloses = chartC.map((c) => c.close);
