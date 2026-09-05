@@ -17,7 +17,7 @@ import Footer from "@/components/Footer";
 import { BtcDashboardPayload } from "@/lib/types";
 
 const POLL_MS = 20_000;
-const DEFAULT_INTERVAL = "1h";
+const DEFAULT_INTERVAL = "4h";
 
 const TABS = [
   { id: "resumen", label: "Resumen" },
