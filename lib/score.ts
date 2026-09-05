@@ -280,8 +280,8 @@ function scoreDerivados(deriv: DerivativesSnapshot, candles: Candle[]): Category
 
   if (deriv.fundingRate !== null) {
     let dir: Direction = "neutral";
-    if (deriv.fundingRate > 0.00001) dir = "bearish";
-else if (deriv.fundingRate < -0.00001) dir = "bullish";
+    if (deriv.fundingRate > 0.0000003) dir = "bearish";
+else if (deriv.fundingRate < -0.0000003) dir = "bullish";
     checks.push({
       label: "Funding rate",
       weight: 4,
