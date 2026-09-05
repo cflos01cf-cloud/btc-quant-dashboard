@@ -60,9 +60,9 @@ function detectRegime(ind: IndicatorSnapshot, candles: Candle[]): Regime {
   const squeeze = bandWidth / ind.bbMid < 0.015;
 
   // ADX < 20 = no trend
-  const noTrend = ind.adx14 < 20;
+  const noTrend = ind.adx14 < 15;
 
-  if (noTrend && squeeze) return "ranging";
+  if (noTrend) return "ranging";
 
   const priceMove = (last.close - prev.close) / prev.close;
   const prevBandWidth = (ind.bbUpper - ind.bbLower) / ind.bbMid;
