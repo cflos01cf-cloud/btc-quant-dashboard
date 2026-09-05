@@ -128,7 +128,8 @@ async function safeFetch<T>(
 function buildPayload(args: {
   source: "live" | "demo";
   warning?: string;
-    chartCandles?: Candle[];
+      candles?: Candle[];
+  chartCandles?: Candle[];
   orderBook: { bidVolume: number; askVolume: number; imbalanceRatio: number };
   derivatives: DerivativesSnapshot;
   whales: WhaleSummary;
