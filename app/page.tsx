@@ -99,7 +99,7 @@ export default function Page() {
               ))}
             </nav>
 
-            {tab === "resumen" && <CandleChart candles={data.candles} indicators={data.indicators} />}
+            {tab === "resumen" && <CandleChart candles={data.candles} indicators={data.indicators} emaSeries={data.emaSeries} />}
 
             {tab === "indicadores" && (
               <div className="grid lg:grid-cols-2 gap-5">
