@@ -58,6 +58,67 @@ export async function getKlines(
   limit: number
 ): Promise<{ candles: Candle[]; resolvedInterval: string }> {
   const { seconds, label } = resolveGranularity(interval);
+  const cacheKey = `candles:${seconds}:${limit}`;
+  const cached = getCached<Candle[]>(cacheKey, 15_000);
+  if (cached) return { candles: cached, resolvedInterval: label };
+
+  const periodMs = seconds * 1000;
+  const nowMs = Date.now();
+
+  // Coinbase caps each response at 300 candles. For larger requests we
+  // paginate backward in time with explicit start/end params.
+  const CHUNK = 300;
+  const pages = Math.ceil(limit / CHUNK);
+  const collected: Candle[] = [];
+
+  for (let i = 0; i < pages; i++) {
+    const endMs = nowMs - i * CHUNK * periodMs;
+    const startMs = endMs - CHUNK * periodMs;
+
+    let raw: number[][] = [];
+    try {
+      const startIso = new Date(startMs).toISOString();
+      const endIso = new Date(endMs).toISOString();
+      raw = await fetchJson(
+        `${COINBASE_BASE}/products/${PRODUCT}/candles?granularity=${seconds}&start=${startIso}&end=${endIso}`
+      );
+    } catch {
+      break;
+    }
+
+    if (!Array.isArray(raw) || raw.length === 0) break;
+
+    collected.push(
+      ...raw.map((c) => ({
+        time: c[0] * 1000,
+        low: c[1],
+        high: c[2],
+        open: c[3],
+        close: c[4],
+        volume: c[5] ?? 0,
+      }))
+    );
+
+    if (i < pages - 1) await new Promise((r) => setTimeout(r, 120));
+  }
+
+  // Deduplicate by timestamp, sort ascending, drop the in-progress candle
+  const seen = new Set<number>();
+  const candles: Candle[] = collected
+    .filter((c) => {
+      if (seen.has(c.time)) return false;
+      seen.add(c.time);
+      return true;
+    })
+    .sort((a, b) => a.time - b.time)
+    .filter((c) => c.time + periodMs <= nowMs)
+    .slice(-limit);
+
+  setCached(cacheKey, candles);
+  return { candles, resolvedInterval: label };
+}
+> {
+  const { seconds, label } = resolveGranularity(interval);
   const cacheKey = `candles:${seconds}`;
   const cached = getCached<Candle[]>(cacheKey, 15_000);
   if (cached) return { candles: cached, resolvedInterval: label };
