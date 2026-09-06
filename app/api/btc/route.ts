@@ -55,8 +55,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const base = await const base = await getLiveBtcData(interval, 900);
-const chartBase = base;    const dataNotes: string[] = [];
+    const base = await getLiveBtcData(interval, 900);
+const chartBase = base;    
+const dataNotes: string[] = [];
 
     // Each secondary data source is fetched independently with its own
     // fallback, so one slow/unreachable API (news RSS, futures data) never
