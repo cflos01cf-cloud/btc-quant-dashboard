@@ -117,11 +117,7 @@ export async function getKlines(
   setCached(cacheKey, candles);
   return { candles, resolvedInterval: label };
 }
-> {
-  const { seconds, label } = resolveGranularity(interval);
-  const cacheKey = `candles:${seconds}`;
-  const cached = getCached<Candle[]>(cacheKey, 15_000);
-  if (cached) return { candles: cached, resolvedInterval: label };
+> 
 
   const raw: number[][] = await fetchJson(
     `${COINBASE_BASE}/products/${PRODUCT}/candles?granularity=${seconds}`
