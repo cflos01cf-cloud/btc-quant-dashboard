@@ -53,6 +53,13 @@ export function resolveGranularity(interval: string) {
   return GRANULARITY_MAP[interval] ?? GRANULARITY_MAP["15m"];
 }
 
+/**
+ * Fetch candles with pagination support.
+ *
+ * Coinbase caps each response at 300 candles. For larger requests we paginate
+ * backward in time using explicit start/end params, then merge and dedupe.
+ * This gives us enough history for EMA200 to show proper curvature on charts.
+ */
 export async function getKlines(
   interval: string,
   limit: number
@@ -64,9 +71,6 @@ export async function getKlines(
 
   const periodMs = seconds * 1000;
   const nowMs = Date.now();
-
-  // Coinbase caps each response at 300 candles. For larger requests we
-  // paginate backward in time with explicit start/end params.
   const CHUNK = 300;
   const pages = Math.ceil(limit / CHUNK);
   const collected: Candle[] = [];
@@ -102,7 +106,6 @@ export async function getKlines(
     if (i < pages - 1) await new Promise((r) => setTimeout(r, 120));
   }
 
-  // Deduplicate by timestamp, sort ascending, drop the in-progress candle
   const seen = new Set<number>();
   const candles: Candle[] = collected
     .filter((c) => {
@@ -111,35 +114,6 @@ export async function getKlines(
       return true;
     })
     .sort((a, b) => a.time - b.time)
-    .filter((c) => c.time + periodMs <= nowMs)
-    .slice(-limit);
-
-  setCached(cacheKey, candles);
-  return { candles, resolvedInterval: label };
-}
-> 
-
-  const raw: number[][] = await fetchJson(
-    `${COINBASE_BASE}/products/${PRODUCT}/candles?granularity=${seconds}`
-  );
-
-  const nowMs = Date.now();
-  const periodMs = seconds * 1000;
-
-  const candles: Candle[] = raw
-    .map((c) => ({
-      time: c[0] * 1000,
-      low: c[1],
-      high: c[2],
-      open: c[3],
-      close: c[4],
-      volume: c[5] ?? 0,
-    }))
-    .sort((a, b) => a.time - b.time)
-    // FIX #2: Exclude the current in-progress (incomplete) candle.
-    // A candle is complete only when its close time has passed.
-    // Coinbase `time` is the OPEN time, so we exclude candles where
-    // open_time + period > now (i.e. the candle hasn't closed yet).
     .filter((c) => c.time + periodMs <= nowMs)
     .slice(-limit);
 
@@ -191,30 +165,6 @@ export async function getOrderBookSummary() {
   return result;
 }
 
-/**
- * FIX #1 — Kraken Futures funding rate correct interpretation.
- *
- * Kraken returns TWO funding rate fields in the /tickers response:
- *
- *   fundingRate          — the absolute rate per second (very small number,
- *                          e.g. 1.18e-7). NOT useful for display or scoring.
- *
- *   relativeFundingRate  — the rate as a fraction of the mark price per
- *                          funding period (1h for PF_XBTUSD). This is the
- *                          number comparable to Binance's funding rate.
- *                          e.g. 0.0001 = 0.01% per hour.
- *
- * The previous code used `fundingRate` (absolute per second) and multiplied
- * by 100, producing absurd values like 18.66% which is impossible for any
- * liquid perpetual. The score's Derivados category was voting with corrupted
- * data every cycle.
- *
- * FIX: Use `relativeFundingRate` directly. Multiply by 100 for display as %.
- *
- * Open Interest: Kraken returns OI in USD-denominated contracts (each
- * contract = $1 USD). To convert to BTC, divide by the mark price.
- * The previous code displayed raw contract count as "BTC" which was wrong.
- */
 export async function getDerivativesSnapshot(): Promise<DerivativesSnapshot> {
   const cacheKey = "derivatives";
   const cached = getCached<DerivativesSnapshot>(cacheKey, 30_000);
@@ -230,29 +180,15 @@ export async function getDerivativesSnapshot(): Promise<DerivativesSnapshot> {
 
   try {
     const data = await fetchJson(KRAKEN_FUTURES_TICKERS, 5000);
-
-    // PI_XBTUSD is the liquid BTC perpetual on Kraken (83k+ vol/day, 3.6M OI).
-    // PF_XBTUSD is illiquid (~2k vol/day, 1.9k OI) and returns garbage fundingRate values.
-    const ticker = data?.tickers?.find(
-      (t: any) => t.symbol === "PI_XBTUSD"
-    );
+    const ticker = data?.tickers?.find((t: any) => t.symbol === "PI_XBTUSD");
 
     if (ticker) {
-      // PI_XBTUSD returns fundingRate in per-SECOND format (e.g. -4.09e-10).
-      // Multiply × 3600 to get the rate per hour, which is comparable to
-      // Binance's funding rate (expressed per 8h period).
-      // Example: -4.09e-10 × 3600 = -1.47e-6 per hour ≈ -0.000147% — normal for BTC.
       const fundingRatePerSecond =
         typeof ticker.fundingRate === "number" ? ticker.fundingRate : null;
-
-      result.fundingRate =
-        fundingRatePerSecond !== null ? fundingRatePerSecond * 3600 : null;
-
+      result.fundingRate = fundingRatePerSecond;
       result.markPrice =
         typeof ticker.markPrice === "number" ? ticker.markPrice : null;
 
-      // openInterest for PI_XBTUSD is in USD (not BTC contracts).
-      // Convert to BTC by dividing by markPrice.
       if (
         typeof ticker.openInterest === "number" &&
         result.markPrice !== null &&
@@ -264,7 +200,7 @@ export async function getDerivativesSnapshot(): Promise<DerivativesSnapshot> {
       }
     }
   } catch {
-    /* best-effort only */
+    /* best-effort */
   }
 
   setCached(cacheKey, result);
@@ -321,7 +257,7 @@ export async function getWhaleSummary(
   return result;
 }
 
-export async function getLiveBtcData(interval = "15m", limit = 300) {
+export async function getLiveBtcData(interval = "1h", limit = 300) {
   const [{ candles, resolvedInterval }, ticker, orderBook] = await Promise.all([
     getKlines(interval, limit),
     getTicker24h(),
