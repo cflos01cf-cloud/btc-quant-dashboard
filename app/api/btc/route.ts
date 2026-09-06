@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const base = await getLiveBtcData(interval, 900);
+    const base = await getLiveBtcData(interval, 500);
 const chartBase = base;    
 const dataNotes: string[] = [];
 
@@ -168,9 +168,9 @@ function buildPayload(args: {
   });
 
   return {    emaSeries: {
-      ema20: emaSeries.ema20.slice(-900),
-      ema50: emaSeries.ema50.slice(-900),
-      ema200: emaSeries.ema200.slice(-900),
+      ema20: emaSeries.ema20.slice(-500),
+      ema50: emaSeries.ema50.slice(-500),
+      ema200: emaSeries.ema200.slice(-500),
     },
     source: args.source,
     warning: args.warning,
@@ -190,7 +190,7 @@ function buildPayload(args: {
     fearGreed: args.fearGreed,
     news: args.news,
     maestro,
-    candles: args.candles.slice(-900),
+    candles: args.candles.slice(-500),
     dataNotes: args.dataNotes,
   };
 }
