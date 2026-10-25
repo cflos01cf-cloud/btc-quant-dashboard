@@ -128,6 +128,15 @@ export interface MaestroScore {
   takeProfit2: number | null;
   takeProfit3: number | null;
   riskRewardT1: number | null;
+  // Modelo de convicción (v3): dos puertas independientes.
+  // magnitud   = puntos alineados en la dirección ganadora (= `total`)
+  // conviccion = alineados / (alineados + opuestos) × 100; las categorías
+  //              neutrales quedan fuera del denominador y ya no penalizan.
+  conviccion?: number;
+  magnitud?: number;
+  regimen?: string;
+  minMagnitud?: number;
+  minConviccion?: number;
 }
 
 // ---------- Master payload ----------

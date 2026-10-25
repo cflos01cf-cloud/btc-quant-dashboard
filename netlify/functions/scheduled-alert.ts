@@ -8,7 +8,17 @@ import { getBtcNews } from "../../lib/news";
 import { computeMaestroScore } from "../../lib/score";
 import { buildSignalRecord, listOpenSignals, saveSignal } from "../../lib/blobstore";
 
-const SIGNAL_SCORE_THRESHOLD = 70;
+/**
+ * Umbral de registro para shadow tracking (Supabase).
+ *
+ * Con el modelo de convicción (v3) `maestro.total` ya no es un score sobre
+ * 100 fijos: es la MAGNITUD (puntos alineados en la dirección ganadora), que
+ * en la práctica vive entre 40 y 70. El umbral viejo de 70 habría impedido
+ * que se registrara cualquier señal, incluidas las que el motor sí marca
+ * como COMPRAR/VENDER. 40 captura las señales válidas más un margen de
+ * casos sub-umbral para acumular evidencia estadística.
+ */
+const SIGNAL_SCORE_THRESHOLD = 40;
 const MAX_CONCURRENT_OPEN = 1;
 
 /**
@@ -102,7 +112,8 @@ export default async () => {
     const price = indicators.price;
     const lines = [
       `*BTC Quant Dashboard Pro*`,
-      `Señal: *${maestro.verdict}*  (score ${maestro.total.toFixed(0)}/100)`,
+      `Señal: *${maestro.verdict}*`,
+      `Magnitud ${maestro.total.toFixed(0)} · Convicción ${(maestro.conviccion ?? 0).toFixed(0)}% · Régimen ${maestro.regimen ?? "n/d"}`,
       `Precio: $${price.toFixed(2)}`,
       maestro.stopLoss ? `Stop Loss: $${maestro.stopLoss.toFixed(2)}` : null,
       maestro.takeProfit1 ? `TP1: $${maestro.takeProfit1.toFixed(2)} · TP2: $${maestro.takeProfit2?.toFixed(2)} · TP3: $${maestro.takeProfit3?.toFixed(2)}` : null,

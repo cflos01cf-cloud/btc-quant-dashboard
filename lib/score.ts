@@ -13,7 +13,47 @@ import {
   WhaleSummary,
 } from "./types";
 
-const THRESHOLD = 75;
+/**
+ * MODELO DE CONVICCIÓN (v3)
+ *
+ * Problema del modelo anterior: el score sumaba los puntos de las categorías
+ * alineadas contra un denominador fijo de 100. Las categorías que votaban
+ * neutral aportaban 0 pero seguían ocupando su cuota del total, creando un
+ * techo invisible:
+ *
+ *   Noticias:    3-4 / 10 crónicamente (titulares siempre mixtos)
+ *   Sentimiento: 0 / 5 casi siempre (solo vota en extremos ≤25 / ≥75)
+ *   Derivados:   0 o 15, binario
+ *
+ * Eso drena ~11-26 pts de forma estructural. El máximo realista era ~85-89,
+ * no 100. Pedir 75/100 equivalía a exigir el 84-88% del máximo alcanzable —
+ * necesitaba que absolutamente todo se alineara al mismo tiempo.
+ *
+ * Modelo nuevo — dos puertas independientes:
+ *
+ *   MAGNITUD   = puntos alineados en la dirección ganadora (escala absoluta)
+ *                → ¿hay suficiente evidencia?
+ *
+ *   CONVICCIÓN = alineados / (alineados + opuestos) × 100
+ *                → ¿la evidencia que SÍ votó, está de acuerdo?
+ *
+ * Las categorías neutrales ya no penalizan: quedan fuera del denominador.
+ * Una señal requiere AMBAS puertas. Esto mantiene el filtro contra mercados
+ * divididos (que es lo que queremos evitar) sin castigar los casos donde
+ * la evidencia disponible es clara pero algunas fuentes están calladas.
+ *
+ * El campo `total` que se publica al dashboard y a Supabase sigue siendo la
+ * magnitud, para que los registros históricos sigan siendo comparables.
+ */
+
+// Puerta 1: evidencia mínima en la dirección ganadora
+const MIN_MAGNITUD = 45;
+
+// Puerta 2: porcentaje mínimo de acuerdo entre las categorías que votaron
+const MIN_CONVICCION = 75;
+
+// Se mantiene por compatibilidad con el payload / UI existente
+const THRESHOLD = MIN_MAGNITUD;
 
 function gradeCategory(
   id: string,
@@ -36,42 +76,23 @@ type Regime = "trending_up" | "trending_down" | "ranging" | "breakout_up" | "bre
 function detectRegime(ind: IndicatorSnapshot, candles: Candle[]): Regime {
   const last = candles[candles.length - 1];
   const prev = candles[Math.max(0, candles.length - 5)];
-  const bandWidth = ind.bbUpper - ind.bbLower;
   const noTrend = ind.adx14 < 15;
   const priceMove = (last.close - prev.close) / prev.close;
-  const prevBandWidth = (ind.bbUpper - ind.bbLower) / ind.bbMid;
+  const bandWidthPct = (ind.bbUpper - ind.bbLower) / ind.bbMid;
 
   if (noTrend) return "ranging";
 
-  if (!noTrend) {
-    if (priceMove > 0.01 && prevBandWidth > 0.015) return "breakout_up";
-    if (priceMove < -0.01 && prevBandWidth > 0.015) return "breakout_down";
-    return ind.diPlus > ind.diMinus ? "trending_up" : "trending_down";
-  }
-
-  return "ranging";
+  if (priceMove > 0.01 && bandWidthPct > 0.015) return "breakout_up";
+  if (priceMove < -0.01 && bandWidthPct > 0.015) return "breakout_down";
+  return ind.diPlus > ind.diMinus ? "trending_up" : "trending_down";
 }
 
 function scoreTendencia(ind: IndicatorSnapshot, smcEvents: SmcEvent[]): CategoryScore {
-  /**
-   * FIX 1 — ADX+DI: when ADX < 15, vote in the direction of the dominant DI
-   * with reduced weight (2 instead of 5) instead of neutral.
-   * Previously: neutral when ADX < 20 → lost 5 pts even with clear DI direction.
-   * Now: always votes, just with less conviction when trend is weak.
-   */
-  let adxDirection: Direction;
   let adxWeight: number;
-  if (ind.adx14 >= 20) {
-    adxDirection = ind.diPlus > ind.diMinus ? "bullish" : "bearish";
-    adxWeight = 5;
-  } else if (ind.adx14 >= 15) {
-    adxDirection = ind.diPlus > ind.diMinus ? "bullish" : "bearish";
-    adxWeight = 3;
-  } else {
-    // ADX < 15: very weak trend, vote DI direction with minimal weight
-    adxDirection = ind.diPlus > ind.diMinus ? "bullish" : "bearish";
-    adxWeight = 2;
-  }
+  if (ind.adx14 >= 20) adxWeight = 5;
+  else if (ind.adx14 >= 15) adxWeight = 3;
+  else adxWeight = 2;
+  const adxDirection: Direction = ind.diPlus > ind.diMinus ? "bullish" : "bearish";
 
   const checks: ScoreCheck[] = [
     {
@@ -115,12 +136,6 @@ function scoreTendencia(ind: IndicatorSnapshot, smcEvents: SmcEvent[]): Category
 }
 
 function scoreMomentum(ind: IndicatorSnapshot): CategoryScore {
-  /**
-   * FIX 2 — StochRSI neutral: when StochRSI is in middle zone (not overbought/oversold),
-   * use MACD direction as tiebreaker instead of voting neutral.
-   * Previously: neutral when K not crossing D in OB/OS zone → lost 4 pts.
-   * Now: votes MACD direction with weight 2 when neutral (less conviction).
-   */
   let stochDir: Direction;
   let stochWeight: number;
   const stochInExtreme = ind.stochRsiK > 80 || ind.stochRsiK < 20;
@@ -131,17 +146,31 @@ function scoreMomentum(ind: IndicatorSnapshot): CategoryScore {
     stochDir = "bearish";
     stochWeight = 4;
   } else {
-    // Neutral zone — use MACD as tiebreaker with reduced weight
     stochDir = ind.macd > ind.macdSignal ? "bullish" : "bearish";
     stochWeight = 2;
+  }
+
+  // RSI: en zona media usa la pendiente del MACD como desempate en vez de
+  // votar neutral — mismo criterio aplicado a StochRSI y order book.
+  let rsiDir: Direction;
+  let rsiWeight: number;
+  if (ind.rsi14 > 55) {
+    rsiDir = "bullish";
+    rsiWeight = 4;
+  } else if (ind.rsi14 < 45) {
+    rsiDir = "bearish";
+    rsiWeight = 4;
+  } else {
+    rsiDir = ind.macdHist >= 0 ? "bullish" : "bearish";
+    rsiWeight = 2;
   }
 
   const checks: ScoreCheck[] = [
     {
       label: "RSI(14)",
-      weight: 4,
-      direction: ind.rsi14 > 55 ? "bullish" : ind.rsi14 < 45 ? "bearish" : "neutral",
-      detail: `RSI ${ind.rsi14.toFixed(1)}`,
+      weight: rsiWeight,
+      direction: rsiDir,
+      detail: `RSI ${ind.rsi14.toFixed(1)}${rsiWeight < 4 ? " (zona media, desempate MACD)" : ""}`,
     },
     {
       label: "MACD",
@@ -153,7 +182,7 @@ function scoreMomentum(ind: IndicatorSnapshot): CategoryScore {
       label: "Stochastic RSI",
       weight: stochWeight,
       direction: stochDir,
-      detail: `%K ${ind.stochRsiK.toFixed(0)} / %D ${ind.stochRsiD.toFixed(0)}${stochInExtreme ? "" : " (MACD tiebreaker)"}`,
+      detail: `%K ${ind.stochRsiK.toFixed(0)} / %D ${ind.stochRsiD.toFixed(0)}${stochInExtreme ? "" : " (desempate MACD)"}`,
     },
     {
       label: "Parabolic SAR",
@@ -175,12 +204,6 @@ function scoreVolumen(
     ? lastCandleUp ? "bullish" : "bearish"
     : ind.obvSlope;
 
-  /**
-   * FIX 3 — Order book neutral: when imbalance ratio is between 0.9-1.1 (neutral),
-   * use OBV slope as tiebreaker instead of voting neutral.
-   * Previously: neutral when ratio 0.9-1.1 → lost 5 pts.
-   * Now: votes OBV direction with weight 3 when neutral (less conviction).
-   */
   let obDir: Direction;
   let obWeight: number;
   if (orderBook.imbalanceRatio > 1.1) {
@@ -190,7 +213,6 @@ function scoreVolumen(
     obDir = "bearish";
     obWeight = 5;
   } else {
-    // Neutral order book — use OBV as tiebreaker
     obDir = ind.obvSlope;
     obWeight = 3;
   }
@@ -220,7 +242,7 @@ function scoreVolumen(
       label: "Imbalance del order book",
       weight: obWeight,
       direction: obDir,
-      detail: `Ratio bid/ask: ${orderBook.imbalanceRatio.toFixed(2)}${obWeight < 5 ? " (OBV tiebreaker)" : ""}`,
+      detail: `Ratio bid/ask: ${orderBook.imbalanceRatio.toFixed(2)}${obWeight < 5 ? " (desempate OBV)" : ""}`,
     },
   ];
   return gradeCategory("volumen", "Volumen", checks, 20);
@@ -229,11 +251,6 @@ function scoreVolumen(
 function scoreSmartMoney(smcEvents: SmcEvent[], whales: WhaleSummary): CategoryScore {
   const microEvents = smcEvents.filter((e) => e.type !== "BOS" && e.type !== "CHOCH");
 
-  /**
-   * FIX 4 — Equalize Smart Money weights: previously OBs weighed 4 and FVGs weighed 2,
-   * causing 2 bearish OBs (8 pts) to always override 2 bullish FVGs (4 pts).
-   * Now all microstructure events weigh 3 each for fair competition.
-   */
   const checks: ScoreCheck[] = microEvents.map((e) => ({
     label: e.label,
     weight: 3,
@@ -281,12 +298,12 @@ function scoreDerivados(deriv: DerivativesSnapshot, candles: Candle[]): Category
   if (deriv.fundingRate !== null) {
     let dir: Direction = "neutral";
     if (deriv.fundingRate > 0.0000003) dir = "bearish";
-else if (deriv.fundingRate < -0.0000003) dir = "bullish";
+    else if (deriv.fundingRate < -0.0000003) dir = "bullish";
     checks.push({
       label: "Funding rate",
       weight: 4,
       direction: dir,
-      detail: `${(deriv.fundingRate * 100).toFixed(4)}%/h`,
+      detail: `${(deriv.fundingRate * 3600 * 100).toFixed(4)}%/h`,
     });
   }
 
@@ -360,23 +377,34 @@ export function computeMaestroScore(args: {
   const direction: Direction =
     bullTotal > bearTotal ? "bullish" : bearTotal > bullTotal ? "bearish" : "neutral";
 
-  let total = categories
-    .filter((c) => c.direction === direction)
-    .reduce((s, c) => s + c.points, 0);
+  // MAGNITUD: puntos alineados en la dirección ganadora
+  let magnitud = direction === "bullish" ? bullTotal : direction === "bearish" ? bearTotal : 0;
+  const opuestos = direction === "bullish" ? bearTotal : direction === "bearish" ? bullTotal : 0;
 
-  // Regime adjustments
+  // Ajuste de régimen sobre la magnitud (no sobre la convicción: el consenso
+  // entre categorías no cambia porque el mercado esté lateral)
   if (regime === "ranging") {
-    total = total * 0.8;
+    magnitud = magnitud * 0.8;
   }
   if (
     (regime === "breakout_up" && direction === "bullish") ||
     (regime === "breakout_down" && direction === "bearish")
   ) {
-    total = Math.min(100, total * 1.2);
+    magnitud = Math.min(100, magnitud * 1.2);
   }
 
+  // CONVICCIÓN: las categorías neutrales quedan fuera del denominador
+  const votaron = magnitud + opuestos;
+  const conviccion = votaron > 0 ? (magnitud / votaron) * 100 : 0;
+
+  // Las dos puertas deben cumplirse simultáneamente
   let verdict: Verdict = "NO_OPERAR";
-  if (direction !== "neutral" && total >= THRESHOLD && regime !== "ranging") {
+  if (
+    direction !== "neutral" &&
+    regime !== "ranging" &&
+    magnitud >= MIN_MAGNITUD &&
+    conviccion >= MIN_CONVICCION
+  ) {
     verdict = direction === "bullish" ? "COMPRAR" : "VENDER";
   }
 
@@ -400,7 +428,7 @@ export function computeMaestroScore(args: {
   return {
     verdict,
     direction,
-    total,
+    total: magnitud,
     threshold: THRESHOLD,
     categories,
     stopLoss,
@@ -408,5 +436,10 @@ export function computeMaestroScore(args: {
     takeProfit2,
     takeProfit3,
     riskRewardT1,
+    conviccion,
+    magnitud,
+    regimen: regime,
+    minMagnitud: MIN_MAGNITUD,
+    minConviccion: MIN_CONVICCION,
   };
 }

@@ -65,11 +65,27 @@ export default function ScoreBreakdown({ maestro }: { maestro: MaestroScore }) {
         <div className="flex-1 w-full">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
             <p className="text-xs uppercase tracking-[0.18em] text-ink-500">
-              Prompt Maestro — Score ponderado
+              Prompt Maestro — Magnitud y convicción
             </p>
             <span className={`px-3 py-1.5 rounded-md border font-mono text-sm tracking-wide ${VERDICT_STYLES[maestro.verdict]}`}>
               {VERDICT_LABEL[maestro.verdict]}
             </span>
+          </div>
+
+          {/* Las dos puertas del modelo de convicción (v3) */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <GateStat
+              label="Magnitud"
+              value={Math.round(maestro.total)}
+              min={maestro.minMagnitud ?? 45}
+              suffix=""
+            />
+            <GateStat
+              label="Convicción"
+              value={Math.round(maestro.conviccion ?? 0)}
+              min={maestro.minConviccion ?? 75}
+              suffix="%"
+            />
           </div>
 
           <div className="space-y-2">
@@ -90,8 +106,11 @@ export default function ScoreBreakdown({ maestro }: { maestro: MaestroScore }) {
           </div>
 
           <p className="mt-3 text-xs text-ink-500">
-            Regla: solo hay señal de COMPRAR/VENDER con score ≥ {maestro.threshold}/100 en una dirección
-            clara. En cualquier otro caso: NO OPERAR.
+            Regla: hay señal de COMPRAR/VENDER solo si se cumplen las dos puertas —
+            magnitud ≥ {maestro.minMagnitud ?? 45} (evidencia suficiente) y
+            convicción ≥ {maestro.minConviccion ?? 75}% (acuerdo entre las categorías que
+            votaron; las neutrales no cuentan). Un mercado en rango bloquea la señal
+            aunque ambas se cumplan. En cualquier otro caso: NO OPERAR.
           </p>
         </div>
       </div>
@@ -125,6 +144,47 @@ function RiskStat({
       <p className="text-[11px] uppercase tracking-wide text-ink-500">{label}</p>
       <p className={`font-mono tabular text-sm ${tone === "bull" ? "text-bull" : tone === "bear" ? "text-bear" : "text-ink-100"}`}>
         {value}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Una de las dos puertas del modelo de convicción.
+ * Verde cuando la puerta se cumple, ámbar cuando falta.
+ */
+function GateStat({
+  label,
+  value,
+  min,
+  suffix,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  suffix: string;
+}) {
+  const pass = value >= min;
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 ${
+        pass ? "border-bull/40 bg-bull-dim/20" : "border-edge bg-surface2/60"
+      }`}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-[11px] uppercase tracking-wide text-ink-500">{label}</p>
+        <span className="text-[10px] font-mono text-ink-500">
+          min {min}
+          {suffix}
+        </span>
+      </div>
+      <p
+        className={`font-mono tabular text-lg ${
+          pass ? "text-bull" : "text-ink-100"
+        }`}
+      >
+        {value}
+        {suffix}
       </p>
     </div>
   );

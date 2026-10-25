@@ -11,19 +11,21 @@ import { DerivativesSnapshot, WhaleSummary } from "../../lib/types";
 /**
  * Runs every 5 minutes. Fetches BTC/MXN data from Bitso, runs the same
  * Prompt Maestro score engine used for Coinbase data, and records any
- * qualifying signal (score ≥ 60) in Netlify Blobs for later comparison.
+ * qualifying signal in Supabase for later comparison against Coinbase.
  *
- * Why score ≥ 60 instead of ≥ 85?
- * We want to accumulate 30-40 closed signals per source within 4-6 weeks.
- * With the 85/100 threshold, signals are rare by design. Lowering to 60
- * for tracking purposes gives us enough data points to compare signal
- * quality across sources while still filtering pure noise. The 85/100
- * rule still governs the live COMPRAR/VENDER alerts to Telegram.
+ * Umbral de registro (shadow tracking):
+ * Con el modelo de convicción (v3) `maestro.total` es la MAGNITUD — puntos
+ * alineados en la dirección ganadora — no un score sobre 100 fijos. Vive
+ * entre 40 y 70 en la práctica, así que el umbral viejo de 70 habría
+ * impedido registrar cualquier señal. 40 captura las señales válidas más
+ * casos sub-umbral, para acumular 30-40 señales cerradas por fuente en
+ * 4-6 semanas. Las dos puertas (magnitud ≥ 45 y convicción ≥ 75%) siguen
+ * gobernando las alertas COMPRAR/VENDER reales a Telegram.
  *
  * NO ORDER ENDPOINTS are used or imported anywhere in this file.
  */
 
-const SIGNAL_SCORE_THRESHOLD = 70;
+const SIGNAL_SCORE_THRESHOLD = 40;
 // Don't record a new signal if one from the same source is already open —
 // we want to track discrete, non-overlapping signals for clean comparison.
 const MAX_CONCURRENT_OPEN = 1;
