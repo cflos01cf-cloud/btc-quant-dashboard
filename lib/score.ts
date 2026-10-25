@@ -23,7 +23,16 @@ import {
  *
  *   Noticias:    3-4 / 10 crónicamente (titulares siempre mixtos)
  *   Sentimiento: 0 / 5 casi siempre (solo vota en extremos ≤25 / ≥75)
- *   Derivados:   0 o 15, binario
+ *   Derivados:   0 u 8, binario (depende de un solo check: funding rate)
+ *
+ * Reparto de puntos (v3.1) — Derivados bajó de 15 a 8 porque dependía de un
+ * único check que pasa la mayor parte del tiempo en zona neutral; 15 puntos
+ * no correspondían a lo que la categoría realmente aporta. Los 7 liberados
+ * fueron a Tendencia (25→28) y Volumen (20→24), que votan en todos los
+ * ciclos. Esto sube el techo efectivo de magnitud sin mover los umbrales.
+ *
+ *   Tendencia 28 · Momentum 15 · Volumen 24 · Smart Money 10
+ *   Sentimiento 5 · Derivados 8 · Noticias 10   = 100
  *
  * Eso drena ~11-26 pts de forma estructural. El máximo realista era ~85-89,
  * no 100. Pedir 75/100 equivalía a exigir el 84-88% del máximo alcanzable —
@@ -132,7 +141,7 @@ function scoreTendencia(ind: IndicatorSnapshot, smcEvents: SmcEvent[]): Category
     });
   }
 
-  return gradeCategory("tendencia", "Tendencia", checks, 25);
+  return gradeCategory("tendencia", "Tendencia", checks, 28);
 }
 
 function scoreMomentum(ind: IndicatorSnapshot): CategoryScore {
@@ -245,7 +254,7 @@ function scoreVolumen(
       detail: `Ratio bid/ask: ${orderBook.imbalanceRatio.toFixed(2)}${obWeight < 5 ? " (desempate OBV)" : ""}`,
     },
   ];
-  return gradeCategory("volumen", "Volumen", checks, 20);
+  return gradeCategory("volumen", "Volumen", checks, 24);
 }
 
 function scoreSmartMoney(smcEvents: SmcEvent[], whales: WhaleSummary): CategoryScore {
@@ -330,7 +339,7 @@ function scoreDerivados(deriv: DerivativesSnapshot, candles: Candle[]): Category
     });
   }
 
-  return gradeCategory("derivados", "Derivados", checks, 15);
+  return gradeCategory("derivados", "Derivados", checks, 8);
 }
 
 function scoreNoticias(news: NewsHeadline[]): CategoryScore {

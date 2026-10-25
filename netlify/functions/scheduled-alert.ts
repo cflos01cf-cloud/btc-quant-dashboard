@@ -7,6 +7,12 @@ import { getFearGreedIndex } from "../../lib/feargreed";
 import { getBtcNews } from "../../lib/news";
 import { computeMaestroScore } from "../../lib/score";
 import { buildSignalRecord, listOpenSignals, saveSignal } from "../../lib/blobstore";
+import {
+  readStructureState,
+  detectStructureEvents,
+  buildStructureMessage,
+  type StructureState,
+} from "../../lib/structure";
 
 /**
  * Umbral de registro para shadow tracking (Supabase).
@@ -95,9 +101,50 @@ export default async () => {
       }
     }
 
+    // ── Canal estructural (independiente del score) ─────────────────────────
+    // Un score mide consenso acumulado y por eso llega tarde. Un cruce de
+    // medias o un flip de Supertrend ocurre en una vela concreta. Esto avisa
+    // de esos cambios aunque el score siga en NO_OPERAR.
+    let structureAlerted = false;
+    let structureEventIds: string[] = [];
+    try {
+      const prevStructure = (await store
+        .get("last-structure", { type: "json" })
+        .catch(() => null)) as StructureState | null;
+      const currStructure = readStructureState(indicators);
+      const structureEvents = detectStructureEvents(prevStructure, currStructure, indicators);
+
+      await store.setJSON("last-structure", currStructure);
+
+      if (structureEvents.length > 0 && botToken && chatId) {
+        structureEventIds = structureEvents.map((e) => e.id);
+        const msg = buildStructureMessage(structureEvents, indicators, "4h");
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "Markdown" }),
+        });
+        structureAlerted = res.ok;
+      } else if (structureEvents.length > 0) {
+        structureEventIds = structureEvents.map((e) => e.id);
+        console.log("[scheduled-alert] Eventos estructurales sin config Telegram:", structureEventIds);
+      }
+    } catch (err: any) {
+      // El canal estructural nunca debe tumbar el canal de señales
+      console.log("[scheduled-alert] Error en canal estructural:", err?.message);
+    }
+
     if (!shouldAlert) {
       return new Response(
-        JSON.stringify({ ok: true, alerted: false, verdict: maestro.verdict, score: maestro.total }),
+        JSON.stringify({
+          ok: true,
+          alerted: false,
+          verdict: maestro.verdict,
+          score: maestro.total,
+          conviccion: maestro.conviccion,
+          structureAlerted,
+          structureEvents: structureEventIds,
+        }),
         { status: 200 }
       );
     }
