@@ -257,6 +257,64 @@ export async function getWhaleSummary(
   return result;
 }
 
+/**
+ * Precio spot actual (último trade en Coinbase).
+ *
+ * Existe para registrar el precio de entrada de las alertas. Antes se usaba
+ * `indicators.price`, que es el cierre de la última vela CERRADA del
+ * timeframe de análisis (6h): una alerta emitida a las 11:00 quedaba con el
+ * precio de las 06:00. En el análisis de noviembre la entrada real resultó
+ * 0.37% peor en promedio que la registrada, y hasta 3.85% en el peor caso,
+ * lo que inflaba los resultados del panel.
+ *
+ * Sin caché: el valor tiene que ser el de este instante.
+ */
+export async function getSpotPrice(): Promise<number | null> {
+  try {
+    const t = await fetchJson(`${COINBASE_BASE}/products/${PRODUCT}/ticker`, 5000);
+    const p = parseFloat(t?.price);
+    return Number.isFinite(p) && p > 0 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Velas CERRADAS entre dos instantes, en orden ascendente. `time` es la
+ * apertura de la vela, igual que en getKlines. Pagina de 300 en 300.
+ *
+ * Lo usa el evaluador de alertas para recorrer la trayectoria completa del
+ * precio desde la entrada, en vez de mirar un solo cierre por hora.
+ */
+export async function getCandlesRange(
+  granSeconds: number,
+  startMs: number,
+  endMs: number
+): Promise<Candle[]> {
+  const periodMs = granSeconds * 1000;
+  const CHUNK = 300 * periodMs;
+  const nowMs = Date.now();
+  const fin = Math.min(endMs, nowMs);
+  const out = new Map<number, Candle>();
+
+  for (let ini = startMs; ini < fin; ini += CHUNK) {
+    const hasta = Math.min(ini + CHUNK, fin);
+    const raw: number[][] = await fetchJson(
+      `${COINBASE_BASE}/products/${PRODUCT}/candles?granularity=${granSeconds}` +
+        `&start=${new Date(ini).toISOString()}&end=${new Date(hasta).toISOString()}`
+    );
+    if (!Array.isArray(raw)) continue;
+    for (const c of raw) {
+      const time = c[0] * 1000;
+      if (time + periodMs > nowMs) continue; // en formación
+      out.set(time, { time, low: c[1], high: c[2], open: c[3], close: c[4], volume: c[5] ?? 0 });
+    }
+    if (hasta < fin) await new Promise((r) => setTimeout(r, 120));
+  }
+
+  return [...out.values()].sort((a, b) => a.time - b.time);
+}
+
 export async function getLiveBtcData(interval = "1h", limit = 300) {
   const [{ candles, resolvedInterval }, ticker, orderBook] = await Promise.all([
     getKlines(interval, limit),

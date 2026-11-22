@@ -215,7 +215,7 @@ export interface SignalRecord {
   closePricePct: number | null;  // % move from entry when closed
   mfePct: number | null;         // max favorable excursion %
   maePct: number | null;         // max adverse excursion %
-  expiresAt: number;             // auto-expire after 24h if no TP/SL hit
+  expiresAt: number;             // vence a las SIGNAL_EXPIRY_HOURS (12h) si no toca TP/SL
 }
 
 export interface CompareStats {

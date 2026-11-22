@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
-import { getDerivativesSnapshot, getLiveBtcData, getWhaleSummary } from "../../lib/marketdata";
+import { getDerivativesSnapshot, getLiveBtcData, getSpotPrice, getWhaleSummary } from "../../lib/marketdata";
 import { buildIndicatorSnapshot } from "../../lib/indicators";
 import { detectSmcEvents } from "../../lib/smc";
 import { getFearGreedIndex } from "../../lib/feargreed";
@@ -42,7 +42,7 @@ export default async () => {
 
   try {
     const base = await getLiveBtcData("4h", 300);
-    const [derivatives, whales, fearGreed, news] = await Promise.all([
+    const [derivatives, whales, fearGreed, news, spot] = await Promise.all([
       getDerivativesSnapshot().catch(() => ({
         fundingRate: null,
         markPrice: null,
@@ -60,9 +60,13 @@ export default async () => {
       })),
       getFearGreedIndex().catch(() => null),
       getBtcNews(8).catch(() => []),
+      getSpotPrice(),
     ]);
 
     const indicators = buildIndicatorSnapshot(base.candles);
+    // Precio de entrada real: el spot de este instante. `indicators.price` es
+    // el cierre de la última vela de 6h cerrada y puede llevar horas de atraso.
+    const precioEntrada = spot ?? indicators.price;
     const smcEvents = detectSmcEvents(base.candles);
     const maestro = computeMaestroScore({
       indicators,
@@ -93,7 +97,7 @@ export default async () => {
           verdict: maestro.verdict,
           direction: maestro.direction as "bullish" | "bearish",
           score: maestro.total,
-          priceReference: indicators.price,
+          priceReference: precioEntrada,
           currency: "USD",
           atr: indicators.atr14,
         });
@@ -156,7 +160,7 @@ export default async () => {
       });
     }
 
-    const price = indicators.price;
+    const price = precioEntrada;
     const lines = [
       `*BTC Quant Dashboard Pro*`,
       `Señal: *${maestro.verdict}*`,

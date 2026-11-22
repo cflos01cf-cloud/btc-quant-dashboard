@@ -229,6 +229,20 @@ export function computeStats(signals: SignalRecord[]): CompareStats {
 }
 
 /**
+ * Vencimiento de las alertas, en horas.
+ *
+ * Era 24h. El análisis de las 44 alertas de Coinbase (jul–nov 2026), medido
+ * contra abrir el mismo trade a cualquier hora de los mismos días, dio:
+ *   12h → +0.34% de ventaja (positiva en las dos mitades del periodo)
+ *   24h → −0.58% (negativa en las dos mitades)
+ * A partir de ~12h el precio tiende a devolver parte del movimiento, lo que
+ * cuadra con que las alertas salen después de que el precio ya se movió.
+ * La ventaja a 12h es estadísticamente débil (t≈1.1): este cambio corrige
+ * un plazo claramente malo, no garantiza uno bueno.
+ */
+export const SIGNAL_EXPIRY_HOURS = 12;
+
+/**
  * Build a new SignalRecord from score engine output.
  */
 export function buildSignalRecord(args: {
@@ -264,6 +278,6 @@ export function buildSignalRecord(args: {
     closePricePct: null,
     mfePct: null,
     maePct: null,
-    expiresAt: now + 24 * 60 * 60_000,
+    expiresAt: now + SIGNAL_EXPIRY_HOURS * 60 * 60_000,
   };
 }

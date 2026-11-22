@@ -5,3 +5,5 @@ out
 .env*.local
 .DS_Store
 npm-debug.log*
+# Exportaciones de datos para análisis local
+data/
